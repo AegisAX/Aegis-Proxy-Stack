@@ -19,22 +19,21 @@ services:
     restart: unless-stopped
     ports:
       - '0.0.0.0:80:80'
-      - '0.0.0.0:443:443'
       - '0.0.0.0:81:81'
+      - '0.0.0.0:443:443'
     environment:
       DB_MYSQL_HOST: "db"
       DB_MYSQL_PORT: 3306
       DB_MYSQL_USER: "npm"
-      # [변수 적용]
       DB_MYSQL_PASSWORD: "${NPM_DB_PASSWORD}"
       DB_MYSQL_NAME: "npm"
       DISABLE_IPV6: 'true' 
     volumes:
       - ./data:/data
-      - ./letsencrypt:/etc/letsencrypt
-      - ./waf-policies:/ext/appsec
-      - ./waf-logs:/ext/appsec-logs
       - ./data/logs:/data/logs
+      - ./letsencrypt:/etc/letsencrypt
+      - ./waf-logs:/ext/appsec-logs
+      - ./waf-share:/ext/appsec
     ipc: host
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=1
@@ -64,14 +63,15 @@ services:
     container_name: aegis-agent
     restart: unless-stopped
     environment:
-      # [변수 적용]
       - agent_token=${AGENT_TOKEN}
       - auto_policy_load=true
+      - nginxproxymanager=true
     volumes:
       - ./waf-config:/etc/cp/conf
       - ./waf-data:/etc/cp/data
       - ./waf-logs:/var/log/nano_agent
-      - ./waf-policies:/ext/appsec
+      - ./waf-share:/ext/appsec
+
     command: /cp-nano-agent --standalone
     ipc: host
     sysctls:
@@ -117,7 +117,6 @@ services:
     container_name: aegis-db
     restart: unless-stopped
     environment:
-      # [변수 적용]
       MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASSWORD}"
       MYSQL_DATABASE: 'npm'
       MYSQL_USER: 'npm'

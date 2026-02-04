@@ -10,9 +10,9 @@ NGINX Proxy Manager(NPM)의 사용 및 관리 편의성에 더하여 엔터프�
 
 * **Core Proxy:** [NGINX Proxy Manager](https://nginxproxymanager.com) 기반의 직관적인 도메인 및 TLS Certificates 관리
 * **ML-Based WAF:** [open-appsec](https://www.openappsec.io) 탑재로 OWASP Top 10 및 제로데이 공격에 대한 선제적 방어 (서명 업데이트 불필요)
-* **Advanced Machine Learning Model:** [고급 머신러닝 모델](https://docs.openappsec.io/getting-started/using-the-advanced-machine-learning-model)을 적용하여 더욱 정확한 방어체계 구축 **(Phase 2 Scheduled)**
-* **Crowd-Sourced IPS:** [CrowdSec](https://www.crowdsec.net) 통합을 통해 전 세계 위협 IP 데이터를 실시간 공유 및 차단 **(Phase 3 Scheduled)**
-* **Real-time Visualization:** [GoAccess](https://goaccess.io)와 [GeoIP2](https://www.maxmind.com)를 연동하여 트래픽 및 공격 원점을 지도 기반으로 시각화 **(Phase 4 Scheduled)**
+* **Advanced Machine Learning Model:** [고급 머신러닝 모델](https://docs.openappsec.io/getting-started/using-the-advanced-machine-learning-model)을 적용한 방어체계 구축 **(Phase 2 Scheduled)**
+* **Crowd-Sourced IPS:** [CrowdSec](https://www.crowdsec.net) 통합으로 전 세계 위협 IP 데이터 실시간 공유 및 차단 **(Phase 3 Scheduled)**
+* **Real-time Visualization:** [GoAccess](https://goaccess.io)와 [GeoIP2](https://www.maxmind.com) 연동으로 트래픽 및 공격지점 지도 기반 시각화 **(Phase 4 Scheduled)**
 * **Aegis 통합 관리 UI:** 상기 보안 솔루션을 통합하여 관리하기 위한 웹 기반 관리 솔루션 개발 **(Phase 5 Scheduled)**
 
 ## 📜 Architecture (Roadmap)
@@ -52,13 +52,14 @@ Aegis-Proxy-Stack은 단순한 통합을 넘어, 운영 안정성과 보안 규�
 **본 프로젝트는 보안상의 이유로 `root` 계정이 아닌 `일반 사용자` 계정으로 설치 및 실행하는 것을 권장합니다.**
 
 #### 1. Docker 설치 및 버전 확인 (필수)
-터미널에서 아래 명령어를 입력하여 설치된 버전을 확인합니다.
+터미널에서 아래 명령어를 입력하여 설치된 버전이 아래의 최소 요구사항을 만족하는지 확인합니다.
+
+* Docker version 20.10.x 이상
+* Docker Compose version v2.0.x 이상
+
 > ```bash
 > docker --version
-> # 최소 요구사항: Docker version 20.10.x 이상
-> 
 > docker compose version
-> # 최소 요구사항: Docker Compose version v2.0.x 이상
 > ```
 
 **🚨 Docker가 없거나 버전이 낮은 경우 (해결 방법)**
@@ -79,19 +80,18 @@ Aegis-Proxy-Stack은 단순한 통합을 넘어, 운영 안정성과 보안 규�
 **🚨 `permission denied` 에러가 발생한다면 아래 Step 2를 진행하세요.**
 
 **Step 2. Docker 그룹에 사용자 추가 (필요시)**
+* 현재 사용자를 docker 그룹에 추가 및 그룹 변경 사항 적용을 위해 아래 명령어 실행
+
 > ```bash
-> # 1. 현재 사용자를 docker 그룹에 추가
-> sudo usermod -aG docker $USER
-> 
-> # 2. 그룹 변경 사항을 적용하기 위해 로그아웃 후 다시 로그인 (또는 아래 명령어 실행)
+> sudo usermod -aG docker $USER 
 > newgrp docker
 > ```
 
 #### 3. 필수 포트 확인
 Aegis-Proxy-Stack은 다음 포트를 사용합니다. 해당 포트가 이미 사용 중인지 확인하세요.
-> * **80 (HTTP):** 웹 서비스 (Let’s Encrypt Certificates 자동 발급)
-> * **443 (HTTPS):** 웹 서비스 (TLS)
-> * **81 (Admin):** NGINX Proxy Manager 관리자 페이지
+* **80 (HTTP):** 웹 서비스 (Let’s Encrypt Certificates 자동 발급)
+* **81 (Admin):** NGINX Proxy Manager 관리자 페이지
+* **443 (HTTPS):** 웹 서비스 (TLS)
 
 #### 4. open-appsec 토큰 발급 (Get Agent Token)
 WAF 엔진을 활성화하기 위해 관리 포털에서 에이전트 토큰을 발급 받아야 합니다.
@@ -102,7 +102,7 @@ WAF 엔진을 활성화하기 위해 관리 포털에서 에이전트 토큰을 
 > 5. **Management** 유형은 **Declarative configuration - using open-appsec configuration file**로 선택합니다.
 > 6. 화면에 표시되는 **Agent Token** (예: `cp-xxxxxxxx...`)을 복사하여 안전한 곳에 기록합니다.
 > 7. 페이지 오른쪽 상단의 **Enforce** 버튼을 클릭하여 정책을 시행합니다.
-> * **Note:** 이 토큰은 다음 단계인 `install.sh` 실행 시 입력해야 합니다.
+* **Note:** 이 토큰은 다음 단계인 `install.sh` 실행 시 입력해야 합니다.
 
 ---
 
@@ -135,22 +135,30 @@ WAF 엔진을 활성화하기 위해 관리 포털에서 에이전트 토큰을 
 
 **4. 서비스 실행 (Start Services)**
 > ```bash
-> docker-compose up -d
+> docker compose up -d
 > ```
 
 **5. 실행 상태 확인 (Verify)**
-모든 컨테이너가 `healthy` 상태인지 확인합니다.
+
+모든 컨테이너가 `healthy` 또는 `Up` 상태인지 확인합니다.
 > ```bash
-> docker-compose ps
+> docker compose ps
 > ```
-> **Note:** 초기 실행 시 데이터베이스 및 WAF 엔진 초기화로 인해 `aegis-npm` 컨테이너가 시작되기까지 약 1~2분이 소요될 수 있습니다.
+
+**정상 결과 예시:**
+> * `aegis-agent`: **(healthy)**
+> * `aegis-db`: **(healthy)**
+> * `aegis-log-rotator`: **(Up)**
+> * `aegis-npm`: **(healthy)**
+
+**Note:** 초기 실행 시 데이터베이스 및 WAF 엔진 초기화로 인해 `aegis-npm` 컨테이너가 시작되기까지 약 1~2분이 소요될 수 있습니다.
 
 ---
 
 ## ⚙️ Configuration & Usage
 
 ### 1. 관리자 페이지 접속
-브라우저를 열고 서버의 81번 포트로 접속합니다.
+브라우저를 열고 서버의 81번 포트로 아래 계정 정보를 이용하여 접속한 후 계정 정보를 원하는 정보로 변경합니다.
 > * **URL:** `http://your-server-ip:81`
 > * **Default Email:** `admin@example.com`
 > * **Default Password:** `changeme`
@@ -158,10 +166,10 @@ WAF 엔진을 활성화하기 위해 관리 포털에서 에이전트 토큰을 
 ⚠️ **보안 권장사항:** 로그인 즉시 관리자 계정의 이메일과 비밀번호를 변경하십시오.
 
 ### 2. WAF(open-appsec) 활성화 확인
-> 1. NGINX Proxy Manager 관리자 화면에서 **Proxy Hosts** 메뉴로 이동합니다.
+> 1. NGINX Proxy Manager 관리자 화면에서 **Hosts** > **Proxy Hosts** > **Add Proxy Host** 메뉴를 클릭합니다.
 > 2. 호스트를 추가하거나 기존 호스트를 편집합니다.
-> 3. 설정 팝업창 상단 탭에 **open-appsec** 항목이 존재하는지 확인합니다.
-> 4. `Enable Protection`을 체크하면 해당 도메인에 대한 기계 학습 기반 보호가 즉시 시작됩니다.
+> 3. 설정 팝업창에 **open-appsec** 항목이 존재하는지 확인합니다.
+> 4. `open-appsec` 토글 스위치를 On으로 변경하면 해당 도메인에 대한 기계 학습 기반 보호가 활성화됩니다.
 
 ### 3. 주요 디렉토리 구조
 설치 후 생성되는 주요 데이터 폴더는 다음과 같습니다.
@@ -175,60 +183,50 @@ WAF 엔진을 활성화하기 위해 관리 포털에서 에이전트 토큰을 
 
 설치가 완료되었다면, 다음 단계에 따라 시스템이 정상적으로 작동하는지 검증합니다.
 
-### 1. 컨테이너 상태 확인 (Health Check)
-모든 컨테이너가 `healthy` 또는 `Up` 상태인지 확인합니다.
-```bash
-docker-compose ps
-```
-
-**정상 결과 예시:**
-> * `aegis-npm`: **(healthy)**
-> * `aegis-agent`: **(Up)**
-> * `aegis-db`: **(healthy)**
-> * `aegis-log-rotator`: **(Up)**
-
-### 2. WAF 동작 테스트 (Attack Simulation)
+### 1. WAF 동작 테스트 (Attack Simulation)
 가장 중요한 단계입니다. 실제로 웹 공격 패턴을 전송하여 WAF가 이를 차단하는지 확인합니다.
 
 **Step 1. 테스트용 호스트 생성**
 
-    1. NPM 관리자 페이지(`http://서버IP:81`)에 로그인합니다.
-    2. **Proxy Hosts** -> **Add Proxy Host** 클릭합니다.
-    3. **Details** 탭:
-        * Domain Names: `test.aegis.local` (또는 보유한 실제 도메인)
-        * Forward Hostname / IP: `127.0.0.1` (또는 아무 웹서버 IP)
-        * Forward Port: `80`
-    4. **open-appsec** 탭 (중요):
-        * **Enable Protection** 체크 ✅
-    5. 저장합니다.
+> 1. NGINX Proxy Manager 관리자 페이지(`http://서버IP:81`)에 로그인합니다.
+> 2. **Hosts** > **Proxy Hosts** > **Add Proxy Host** 메뉴를 클릭합니다.
+> 3. **Details** 탭:
+>     * Domain Names: `test.aegis.local` (또는 보유한 실제 도메인)
+>     * Forward Hostname / IP: `127.0.0.1` (또는 아무 웹서버 IP)
+>     * Forward Port: `80`
+> 4. **open-appsec** (중요):
+>     * **토글 스위치 On** 체크 ✅
+> 5. 저장합니다.
 
 **Step 2. 공격 시뮬레이션 (SQL Injection / XSS)**
 터미널에서 `curl` 명령어를 사용하여 공격 패턴이 포함된 요청을 보냅니다.
 *(도메인을 실제 등록하지 않았다면 `-H "Host: ..."` 옵션을 사용합니다)*
-
-```bash
-# 1. 정상 요청 (통과되어야 함)
-curl -I -H "Host: test.aegis.local" http://127.0.0.1/
-# 결과: HTTP/1.1 200 OK (또는 302/404 등 웹서버 응답)
-
-# 2. SQL Injection 공격 시도 (차단되어야 함)
-curl -I -H "Host: test.aegis.local" "http://127.0.0.1/?id=1' OR '1'='1"
-# 결과: HTTP/1.1 403 Forbidden
-
-# 3. XSS 공격 시도 (차단되어야 함)
-curl -I -H "Host: test.aegis.local" "http://127.0.0.1/?search=<script>alert(1)</script>"
-# 결과: HTTP/1.1 403 Forbidden
-```
+> 1. 정상 요청 (통과되어야 함)
+> 결과: HTTP/1.1 200 OK (또는 302/404 등 웹서버 응답)
+> ```bash
+> curl -I -H "Host: test.aegis.local" http://127.0.0.1/
+> ```
+> 
+> 2. SQL Injection 공격 시도 (차단되어야 함)
+> 결과: HTTP/1.1 403 Forbidden
+> ```bash
+> curl -I -H "Host: test.aegis.local" "http://127.0.0.1/?id=1' OR '1'='1"
+> ```
+> 
+> 3. XSS 공격 시도 (차단되어야 함)
+> 결과: HTTP/1.1 403 Forbidden
+> ```bash
+> curl -I -H "Host: test.aegis.local" "http://127.0.0.1/?search=<script>alert(1)</script>"
+> ```
 
 **🎉 성공 판정:** 공격 패턴이 포함된 요청에 대해 **`403 Forbidden`** 응답이 온다면 WAF가 정상적으로 공격을 방어하고 있는 것입니다.
 
-### 3. 로그 확인 (Log Check)
+### 2. 로그 확인 (Log Check)
 차단된 공격 기록이 로그 파일에 남는지 확인합니다.
-
-```bash
-# WAF 보안 로그 실시간 확인
-tail -f waf-logs/waf_security_log.log
-```
+> * WAF 보안 로그 실시간 확인
+> ```bash
+> tail -f waf-logs/waf_security_log.log
+> ```
 
 로그 파일에 방금 실행한 `curl` 명령의 차단 내역(SQL Injection, XSS)이 JSON 형태로 기록되어 있어야 합니다.
 
