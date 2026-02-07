@@ -11,3 +11,4 @@ aegis-config/agent/
 .DS_Store
 Thumbs.db
 .env
+VERSION
