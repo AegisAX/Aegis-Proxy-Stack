@@ -111,7 +111,7 @@ Aegis-Proxy-Stack은 단순한 통합을 넘어, 운영 안정성과 보안 규�
 
 2. **저장소 복제 (Clone Repository)**
    ```bash
-   git clone https://github.com/NanumInfo/aegis-proxy-stack.git
+   git clone https://github.com/AegisAX/aegis-proxy-stack.git
    cd aegis-proxy-stack
    ```
 
