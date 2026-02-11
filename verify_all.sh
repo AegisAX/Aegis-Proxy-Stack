@@ -59,6 +59,33 @@ print_banner() {
     echo ""
 }
 
+# --- [ Dependency Check ] ---
+check_dependencies() {
+    echo -ne "   TASK  Checking Node.js & Modules..."
+    
+    # Node.js 설치 확인
+    if ! command -v node >/dev/null 2>&1; then
+        echo -e "\n   FAIL  Node.js is not installed."
+        echo "         Please install Node.js (v18+) to run the verifier."
+        exit 1
+    fi
+
+    # axios 모듈 확인 (로컬 디렉토리 기준)
+    if [ ! -d "node_modules/axios" ]; then
+        echo -e "\n   WARN  Required module 'axios' is missing."
+        read -p "         Would you like to install 'axios' now? (y/n): " INSTALL_AXIOS
+        if [[ $INSTALL_AXIOS =~ ^[yY] ]]; then
+            npm install axios >/dev/null 2>&1
+            echo "   DONE  'axios' installed successfully."
+        else
+            echo "   FAIL  Verification aborted. 'axios' is required."
+            exit 1
+        fi
+    else
+        echo -e "\r   DONE  Node.js & Modules are ready.      "
+done
+}
+
 log_step() {
     echo -e "\n${TXT_WHITE}[ Step $1 ] $2${RESET}"
     echo -e "${TXT_GRAY}----------------------------------------------------------------${RESET}"
@@ -130,6 +157,7 @@ execute_with_spinner() {
 # --- [Main Script Start] ---
 
 print_banner
+check_dependencies
 
 # ------------------------------------------------------------------------------
 # 0. Load Configuration & Initialize Credentials

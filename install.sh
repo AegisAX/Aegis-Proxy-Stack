@@ -9,7 +9,7 @@ export LC_ALL=C
 export LANG=C
 
 # [Constraint] Version is fixed until explicit user update
-RELEASE_VERSION="v0.4.0"
+RELEASE_VERSION="v0.4.1"
 
 # --- [Universal Color Palette] ---
 TXT_RED='\033[1;31m'
@@ -136,6 +136,14 @@ print_banner
 # ------------------------------------------------------------------------------
 # 0. Check Prerequisites
 # ------------------------------------------------------------------------------
+if ! command -v npm >/dev/null 2>&1; then
+    echo "⚠️  npm이 설치되어 있지 않습니다. Node.js를 먼저 설치해주세요."
+else
+    echo "📦 필수 라이브러리(axios)를 설치합니다..."
+    npm install axios --save-dev >/dev/null 2>&1
+    echo "✅ 라이브러리 설치 완료"
+fi
+
 for pkg in jq curl node; do
     if ! command -v $pkg &> /dev/null; then
         log_error "Missing required package: '$pkg'"

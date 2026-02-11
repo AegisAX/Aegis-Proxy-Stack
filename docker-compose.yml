@@ -5,9 +5,6 @@ name: aegis-proxy-stack
 networks:
   aegis-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
     driver_opts:
       com.docker.network.bridge.name: br-aegis
 
@@ -34,13 +31,11 @@ services:
       - ./aegis-data/npm:/data
       - ./aegis-logs/npm:/data/logs
       - ./aegis-logs/waf:/ext/appsec-logs
-      # 👇 [Timezone Fix] 호스트의 시간 설정을 그대로 따름
       - /etc/localtime:/etc/localtime:ro
     ipc: host
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=1
       - net.ipv6.conf.default.disable_ipv6=1
-      - net.ipv6.conf.lo.disable_ipv6=1
     networks:
       - aegis-network
     healthcheck:
@@ -74,7 +69,6 @@ services:
       - ./aegis-config/policy:/ext/appsec
       - ./aegis-data/learning:/etc/cp/data
       - ./aegis-logs/waf:/var/log/nano_agent
-      # 👇 [Timezone Fix] 호스트의 시간 설정을 그대로 따름
       - /etc/localtime:/etc/localtime:ro
     command: /cp-nano-agent --standalone
     ipc: host
@@ -107,7 +101,6 @@ services:
       - ./aegis-config/logrotate/aegis-rotate.conf:/etc/logrotate.conf
       - ./aegis-logs/npm:/var/log/target/npm
       - ./aegis-logs/waf:/var/log/target/waf
-      # 👇 [Timezone Fix] 호스트의 시간 설정을 그대로 따름
       - /etc/localtime:/etc/localtime:ro
     networks:
       - aegis-network
@@ -130,7 +123,6 @@ services:
     volumes:
       - ./aegis-data/db:/var/lib/mysql
       - ./aegis-config/db-init:/docker-entrypoint-initdb.d
-      # 👇 [Timezone Fix] 호스트의 시간 설정을 그대로 따름
       - /etc/localtime:/etc/localtime:ro
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=1

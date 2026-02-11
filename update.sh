@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # ==============================================================================
-# Aegis Proxy Stack - Intelligent Release Manager (v0.4.0)
+# Aegis Proxy Stack - Intelligent Release Manager (v0.4.1)
 # ==============================================================================
 # 1. 설치 여부 확인 및 환경 점검
-# 2. 업데이트 타겟 선택 (v0.3.2 -> v0.4.0)
+# 2. 업데이트 타겟 선택 (v0.3.2 -> v0.4.1)
 # 3. 안전 백업 및 코드 동기화 (Git Tag)
 # 4. Phase 2 완성형 마이그레이션 (Master Account & Test Script)
 # ==============================================================================
@@ -42,6 +42,11 @@ get_local_version() {
 # ------------------------------------------------------------------------------
 # 0. 설치 여부 확인
 # ------------------------------------------------------------------------------
+if [ ! -d "$BASE_DIR/node_modules/axios" ]; then
+    warn "새로운 기능을 위한 'axios' 라이브러리가 필요합니다."
+    npm install axios >/dev/null 2>&1 && success "라이브러리 업데이트 완료"
+fi
+
 if [ ! -f "$COMPOSE_FILE" ] && [ ! -f ".env" ]; then
     echo -e "${YELLOW}⚠️  Aegis-Proxy-Stack이 설치되지 않았습니다.${NC}"
     read -p "🚀 신규 설치(install.sh)를 진행하시겠습니까? (Y/n): " INSTALL_CONFIRM
@@ -90,7 +95,7 @@ echo "----------------------------------------------------"
 echo "업데이트 목표 버전을 선택하세요:"
 echo "----------------------------------------------------"
 echo -e "1) ${BLUE}v0.3.2${NC} : Phase 2 Standard"
-echo -e "2) ${BLUE}v0.4.0${NC} : Phase 2 Extended (Automated Test & Unified Auth) ${GREEN}[Recommended]${NC}"
+echo -e "2) ${BLUE}v0.4.1${NC} : Phase 2 Extended (Automated Test & Unified Auth) ${GREEN}[Recommended]${NC}"
 echo -e "3) ${YELLOW}Custom${NC} : 태그 직접 입력"
 echo ""
 read -p "선택 (번호 입력): " MENU_CHOICE
