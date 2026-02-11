@@ -1,9 +1,9 @@
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
 ![Security](https://img.shields.io/badge/security-hardened-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-v0.4.0-orange)
+![Version](https://img.shields.io/badge/version-v0.4.1-orange)
 
-# 🛡️ Aegis-Proxy-Stack (v0.4.0)
+# 🛡️ Aegis-Proxy-Stack (v0.4.1)
 
 **Aegis-Proxy-Stack** is an all-in-one integrated security package that combines the exceptional usability of [NGINX Proxy Manager (NPM)](https://nginxproxymanager.com/) with enterprise-grade security solutions (WAF, IPS, Visualizer). It is designed to enable anyone to easily build an efficient web defense system without complex configuration.
 
