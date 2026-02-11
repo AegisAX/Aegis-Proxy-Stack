@@ -21,7 +21,7 @@ Defense-in-depth architecture for hardened containerized web services.
 * **Core Proxy:** [NGINX Proxy Manager](https://nginxproxymanager.com) 기반의 직관적인 도메인 및 TLS Certificates 관리
 * **ML-Based WAF:** [open-appsec](https://www.openappsec.io) 탑재로 OWASP Top 10 및 제로데이 공격에 대한 선제적 방어 (서명 업데이트 불필요)
 * **Advanced Machine Learning Model:** [고급 머신러닝 모델](https://docs.openappsec.io/getting-started/using-the-advanced-machine-learning-model)을 적용한 방어체계 구축 **(Phase 2 Completed)**
-* **Crowd-Sourced IPS:** [CrowdSec](https://www.crowdsec.net) 통합으로 전 세계 위협 IP 데이터 실시간 공유 및 차단 **(Phase 3 Completed)**
+* **Crowd-Sourced IPS:** [CrowdSec](https://www.crowdsec.net) 통합으로 전 세계 위협 IP 데이터 실시간 공유 및 차단 **(Phase 3 Scheduled)**
 * **Real-time Visualization:** [GoAccess](https://goaccess.io)와 [GeoIP2](https://www.maxmind.com) 연동으로 트래픽 및 공격지점 지도 기반 시각화 **(Phase 4 Scheduled)**
 * **Aegis Integrated Management UI:** 상기 보안 솔루션 통합 관리를 위한 웹 기반 관리 솔루션 개발 **(Phase 5 Scheduled)**
 
@@ -30,7 +30,7 @@ Defense-in-depth architecture for hardened containerized web services.
 
 * ✅ **Phase 1:** NGINX Proxy Manager + open-appsec ML-Based WAF Integration
 * ✅ **Phase 2:** Using the Advanced Machine Learning Model
-* ✅ **Phase 3:** CrowdSec IPS Integration
+* ⬜ **Phase 3:** CrowdSec IPS Integration
 * ⬜ **Phase 4:** GoAccess + GeoIP Visualization Setup
 * ⬜ **Phase 5:** Aegis Integrated Management UI
 * ⬜ **Phase 6:** Integration with other Security Solutions
