@@ -83,7 +83,7 @@ check_dependencies() {
         fi
     else
         echo -e "\r   DONE  Node.js & Modules are ready.      "
-done
+    fi
 }
 
 log_step() {
