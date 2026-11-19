@@ -185,8 +185,9 @@ mkdir -p aegis-data/{certs,db,learning,npm}
 mkdir -p aegis-logs/{npm,waf}
 log_task "Created data and log directories."
 
-chmod -R 750 aegis-config aegis-data aegis-logs
-log_success "Directory permissions set (750)."
+# Allow directory traversal without adding execute permission to regular files.
+chmod -R u=rwX,g=rX,o= aegis-config aegis-data aegis-logs
+log_success "Configuration, data, and log permissions set."
 
 
 # ------------------------------------------------------------------------------
