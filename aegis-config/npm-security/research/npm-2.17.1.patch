@@ -1,0 +1,248 @@
+diff --git a/backend/internal/certificate.js b/backend/internal/certificate.js
+index 0c3166a6..0d395b38 100644
+--- a/backend/internal/certificate.js
++++ b/backend/internal/certificate.js
+@@ -707,7 +707,7 @@ const internalCertificate = {
+ 	 * @returns {Promise}
+ 	 */
+ 	writeCustomCert: async (certificate) => {
+-		logger.info("Writing Custom Certificate:", certificate);
++		logger.info("Writing custom certificate");
+ 
+ 		const dir = `/data/custom_ssl/npm-${certificate.id}`;
+ 
+diff --git a/backend/internal/proxy-host.js b/backend/internal/proxy-host.js
+index 7b0a2307..c1416cc1 100644
+--- a/backend/internal/proxy-host.js
++++ b/backend/internal/proxy-host.js
+@@ -1,3 +1,4 @@
++import { withWaf } from "./aegis-waf.js";
+ import _ from "lodash";
+ import errs from "../lib/error.js";
+ import { castJsonIfNeed } from "../lib/helpers.js";
+@@ -484,4 +485,4 @@ const internalProxyHost = {
+ 	},
+ };
+ 
+-export default internalProxyHost;
++export default withWaf(internalProxyHost);
+diff --git a/backend/schema/paths/nginx/proxy-hosts/hostID/put.json b/backend/schema/paths/nginx/proxy-hosts/hostID/put.json
+index fc319845..18cf7b08 100644
+--- a/backend/schema/paths/nginx/proxy-hosts/hostID/put.json
++++ b/backend/schema/paths/nginx/proxy-hosts/hostID/put.json
+@@ -32,6 +32,9 @@
+ 					"additionalProperties": false,
+ 					"minProperties": 1,
+ 					"properties": {
++						"use_openappsec": {"type": "boolean"},
++						"openappsec_mode": {"enum": ["inactive", "detect-learn", "prevent-learn"]},
++						"minimum_confidence": {"enum": ["medium", "high", "critical"]},
+ 						"domain_names": {
+ 							"$ref": "../../../../components/proxy-host-object.json#/properties/domain_names"
+ 						},
+diff --git a/backend/schema/paths/nginx/proxy-hosts/post.json b/backend/schema/paths/nginx/proxy-hosts/post.json
+index 28ddad8f..23f87df1 100644
+--- a/backend/schema/paths/nginx/proxy-hosts/post.json
++++ b/backend/schema/paths/nginx/proxy-hosts/post.json
+@@ -24,6 +24,9 @@
+ 						"forward_port"
+ 					],
+ 					"properties": {
++						"use_openappsec": {"type": "boolean"},
++						"openappsec_mode": {"enum": ["inactive", "detect-learn", "prevent-learn"]},
++						"minimum_confidence": {"enum": ["medium", "high", "critical"]},
+ 						"domain_names": {
+ 							"$ref": "../../../components/proxy-host-object.json#/properties/domain_names"
+ 						},
+diff --git a/backend/setup.js b/backend/setup.js
+index 9e8841e1..dc4477fb 100644
+--- a/backend/setup.js
++++ b/backend/setup.js
+@@ -34,7 +34,7 @@ const setupDefaultUser = async () => {
+ 	const userIsetup = await isSetup();
+ 	if (!userIsetup) {
+ 		// Create a new user and set password
+-		logger.info(`Creating a new user: ${initialAdminEmail} with password: ${initialAdminPassword}`);
++		logger.info("Creating initial administrator");
+ 
+ 		const data = {
+ 			is_deleted: 0,
+diff --git a/frontend/src/modals/ProxyHostModal.tsx b/frontend/src/modals/ProxyHostModal.tsx
+index 38cdb75b..166b9e9a 100644
+--- a/frontend/src/modals/ProxyHostModal.tsx
++++ b/frontend/src/modals/ProxyHostModal.tsx
+@@ -50,7 +50,13 @@ const ProxyHostModal = EasyModal.create(({ id, visible, remove }: Props) => {
+ 		};
+ 		payload.locations = (values.locations || []).filter((location: any) => location.path?.trim() !== "");
+ 
+-		if (!isAdmin) {
++		const { wafMode, wafConfidence } = values;
++        delete payload.wafMode;
++        delete payload.wafConfidence;
++        const { openappsec, ...otherMeta } = payload.meta;
++        payload.meta = otherMeta;
++        if (isAdmin) payload.meta.openappsec = { enabled: wafMode !== "inactive", mode: wafMode, confidence: wafConfidence };
++        if (!isAdmin) {
+ 			delete payload.advanced_config;
+ 			delete payload.advancedConfig;
+ 			// Location advanced configs are sent as-is. Non-admins can't edit them (the editor is
+@@ -112,6 +118,8 @@ const ProxyHostModal = EasyModal.create(({ id, visible, remove }: Props) => {
+ 							// Advanced tab
+ 							advancedConfig: data?.advancedConfig || "",
+ 							meta: data?.meta || {},
++							wafMode: (data?.meta as any)?.openappsec?.mode ?? "inactive",
++							wafConfidence: (data?.meta as any)?.openappsec?.confidence ?? "high",
+ 						} as any
+ 					}
+ 					onSubmit={onSubmit}
+@@ -186,6 +194,13 @@ const ProxyHostModal = EasyModal.create(({ id, visible, remove }: Props) => {
+ 										<div className="tab-content">
+ 											<div className="tab-pane active show" id="tab-details" role="tabpanel">
+ 												<DomainNamesField isWildcardPermitted dnsProviderWildcardSupported />
++                                                {isAdmin && <fieldset className="row mb-3"><legend className="form-label">open-appsec WAF</legend>
++                                                    <div className="col-sm-6"><label htmlFor="wafMode" className="form-label">Enforcement mode</label>
++                                                    <Field as="select" className="form-select" id="wafMode" name="wafMode"><option value="inactive">Inactive</option><option value="detect-learn">Detect and learn</option><option value="prevent-learn">Prevent and learn</option></Field></div>
++                                                    <div className="col-sm-6"><label htmlFor="wafConfidence" className="form-label">Minimum confidence</label>
++                                                    <Field as="select" className="form-select" id="wafConfidence" name="wafConfidence"><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></Field></div>
++                                                </fieldset>}
++
+ 												<div className="row">
+ 													<div className="col-sm-3 col-md-3">
+ 														<Field name="forwardScheme">
+diff --git a/backend/internal/aegis-waf.js b/backend/internal/aegis-waf.js
+new file mode 100644
+index 00000000..f051a587
+--- /dev/null
++++ b/backend/internal/aegis-waf.js
+@@ -0,0 +1,131 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import { randomUUID } from 'node:crypto';
++import * as yaml from 'js-yaml';
++import proxyHostModel from '../models/proxy_host.js';
++import errs from '../lib/error.js';
++
++const directory = '/ext/appsec';
++const policyFile = path.join(directory, 'local_policy.yaml');
++const templateFile = '/app/templates/local-policy-open-appsec-enabled-for-proxy-host.yaml';
++const modes = ['inactive', 'detect-learn', 'prevent-learn'];
++const confidenceLevels = ['medium', 'high', 'critical'];
++const prefix = (kind, id) => `npm-managed-${kind}-proxyhost-${id}`;
++function policy() {
++    const document = yaml.load(fs.readFileSync(policyFile, 'utf8'));
++    if (!Array.isArray(document?.policies?.['specific-rules']) || !Array.isArray(document.practices) || !Array.isArray(document['log-triggers'])) throw new Error('Invalid open-appsec policy');
++    return document;
++}
++function existing(document, row) {
++    const rule = document.policies['specific-rules'].find(rule => rule.name === prefix('specific-rule', row.id));
++    const practice = document.practices.find(practice => practice.name === prefix('practice', row.id));
++    const saved = row.meta?.openappsec;
++    const mode = rule?.mode ?? (saved?.enabled ? saved.mode ?? 'prevent-learn' : 'inactive');
++    const confidence = practice?.['web-attacks']?.['minimum-confidence'] ?? saved?.confidence ?? 'high';
++    return { enabled: mode !== 'inactive', mode, confidence };
++}
++function project(row, document) {
++    const settings = existing(document, row);
++    return { ...row, meta: { ...row.meta, openappsec: settings }, use_openappsec: settings.enabled, openappsec_mode: settings.mode, minimum_confidence: settings.confidence };
++}
++function change(document, row, settings) {
++    const rules = document.policies['specific-rules'];
++    const name = prefix('specific-rule', row.id);
++    const oldRules = rules.filter(rule => rule.name === name || rule.name?.startsWith(`${name}.`));
++    document.policies['specific-rules'] = rules.filter(rule => !oldRules.includes(rule));
++    const prototype = yaml.load(fs.readFileSync(templateFile, 'utf8'));
++    const practice = prefix('practice', row.id);
++    const trigger = prefix('log-trigger', row.id);
++    for (const [collection, target, kind] of [['practices', practice, 'practice'], ['log-triggers', trigger, 'log-trigger']]) {
++        const old = document[collection].find(item => item.name === target);
++        document[collection] = document[collection].filter(item => item.name !== target);
++        if (settings.enabled) {
++            const next = old ?? structuredClone(prototype[collection].find(item => item.name === prefix(kind, 1)));
++            next.name = target;
++            if (kind === 'practice') {
++                next['web-attacks']['override-mode'] = settings.mode;
++                next['web-attacks']['minimum-confidence'] = settings.confidence;
++            }
++            document[collection].push(next);
++        }
++    }
++    if (settings.enabled) {
++        row.domain_names.forEach((host, index) => {
++            const old = oldRules.find(rule => rule.host === host) ?? oldRules[0] ?? {triggers:[trigger], practices:[practice]};
++            document.policies['specific-rules'].push({...old, host, name:index ? `${name}.${index}` : name, mode:settings.mode});
++        });
++    }
++    const temporary = path.join(directory, `.local_policy.${randomUUID()}.tmp`);
++    const permissions = fs.statSync(policyFile).mode & 0o777;
++    try {
++        fs.writeFileSync(temporary, yaml.dump(document, {noRefs:true, lineWidth:-1}), {flag:'wx', mode:permissions});
++        fs.renameSync(temporary, policyFile);
++    } finally { fs.rmSync(temporary, {force:true}); }
++}
++async function applyPolicy() {
++    for (const port of [7777, 7778]) {
++        try {
++            const response = await fetch(`http://127.0.0.1:${port}/set-apply-policy`, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({policy_path:policyFile}), signal:AbortSignal.timeout(3000)});
++            if (response.ok) return;
++        } catch { /* Try the second agent port. */ }
++    }
++    throw new Error('Policy saved. The open-appsec agent has not acknowledged the apply request.');
++}
++export function withWaf(hosts) {
++    // Keep the upstream model methods private. Its update path merges internal get() rows
++    // directly into SQL. Legacy HTTP fields belong only in the public API response.
++    const api = { ...hosts };
++    const get = hosts.get, list = hosts.getAll;
++    api.get = async (...args) => {
++        const row = await get(...args);
++        if (!row.id || (args[1]?.omit?.includes('meta'))) return row;
++        return project(row, policy());
++    };
++    api.getAll = async (...args) => {
++        const rows = await list(...args);
++        if (!rows.length) return rows;
++        const document = policy();
++        return rows.map(row => project(row, document));
++    };
++    for (const action of ['create','update','delete']) {
++        const original = hosts[action];
++        api[action] = async (access, input) => {
++            const data = {...input};
++            const row = action === 'create' ? {id:0, meta:{}, domain_names:[]} : await get(access, {id:data.id});
++            const document = policy();
++            const before = existing(document, row);
++            const metadata = data.meta?.openappsec ?? {};
++            const requestedMode = data.openappsec_mode ?? metadata.mode ?? before.mode;
++            const enabled = data.use_openappsec ?? metadata.enabled ?? (requestedMode !== 'inactive');
++            const mode = enabled ? requestedMode : 'inactive';
++            const confidence = data.minimum_confidence ?? metadata.confidence ?? before.confidence;
++            if (typeof enabled !== 'boolean' || !modes.includes(mode) || (enabled && mode === 'inactive') || !confidenceLevels.includes(confidence)) throw new errs.ValidationError('Unsupported open-appsec settings');
++            const settings = {enabled, mode, confidence};
++            const namesChanged = data.domain_names && JSON.stringify(data.domain_names) !== JSON.stringify(row.domain_names);
++            const requested = Object.keys(metadata).length > 0 || 'use_openappsec' in data || 'openappsec_mode' in data || 'minimum_confidence' in data;
++            const altered = enabled !== before.enabled || mode !== before.mode || confidence !== before.confidence;
++            const needsPolicy = altered || (enabled && (namesChanged || action === 'delete'));
++            if (needsPolicy) await access.can('settings:update', row.id);
++            const locationsProtected = document.policies['specific-rules'].some(rule => rule.name?.startsWith(`${prefix('specific-rule', row.id)}-`));
++            if (locationsProtected && (altered || action === 'delete' || namesChanged || (data.locations && JSON.stringify(data.locations) !== JSON.stringify(row.locations)))) throw new errs.ValidationError('This host has location-specific open-appsec rules. Preserve its locations and domains until those rules are migrated.');
++            if (data.meta || requested) data.meta = {...row.meta, ...data.meta, openappsec:settings};
++            delete data.use_openappsec; delete data.openappsec_mode; delete data.minimum_confidence;
++            const result = await original(access, data);
++            if (needsPolicy) {
++                change(policy(), action === 'delete' ? row : result, action === 'delete' ? {...settings, enabled:false} : settings);
++                if (action !== 'delete') {
++                    // NPM's reload path reads the old YAML while updating nginx_online metadata.
++                    // Reconcile that row with the policy just published before acknowledging the change.
++                    await proxyHostModel.transaction(async trx => {
++                        const current = await proxyHostModel.query(trx).findById(result.id).forUpdate();
++                        await proxyHostModel.query(trx).patchAndFetchById(result.id, {meta:{...current.meta, openappsec:settings}});
++                    });
++                    result.meta = {...result.meta, openappsec:settings};
++                }
++                await applyPolicy();
++            }
++            return action === 'delete' ? result : project(result, policy());
++        };
++    }
++    return api;
++}

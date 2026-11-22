@@ -11,12 +11,12 @@ networks:
 services:
   # [Core 1] NGINX Proxy Manager with WAF Attachment
   npm:
-    image: 'ghcr.io/openappsec/nginx-proxy-manager-attachment:latest'
+    image: 'ghcr.io/openappsec/nginx-proxy-manager-attachment@sha256:7a1f3e88d0e696234638eb15e85f0aa8707de5ab1b10fec0cd8e39282b13f486'
     container_name: aegis-npm
     restart: unless-stopped
     ports:
       - '0.0.0.0:80:80'
-      - '0.0.0.0:81:81'
+      - '${NPM_ADMIN_BIND:-0.0.0.0}:81:81'
       - '0.0.0.0:443:443'
     environment:
       DB_MYSQL_HOST: "db"
@@ -56,7 +56,7 @@ services:
 
   # [Core 2] WAF Agent
   agent:
-    image: 'ghcr.io/openappsec/agent:latest'
+    image: 'ghcr.io/openappsec/agent@sha256:42d56e3d710bb874dfa8fe34dcb2ff90a0b27de03e3fe378b865d4baaf65cc1a'
     container_name: aegis-agent
     restart: unless-stopped
     environment:
@@ -90,8 +90,8 @@ services:
 
   # [Utility] Log Rotator Sidecar
   log-rotator:
-    image: alpine:3.19
-    container_name: aegis-log-rotator
+    image: alpine:3.19@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1
+    container_name: aegis-log
     restart: unless-stopped
     command: >
       /bin/sh -c "apk add --no-cache logrotate docker-cli tzdata && 
@@ -112,7 +112,8 @@ services:
 
   # [Support] Database Service
   db:
-    image: 'jc21/mariadb-aria:latest'
+    image: '${AEGIS_DB_IMAGE:-jc21/mariadb-aria@sha256:a5cfd4eacf2d13e049fc2263d61caa6ecafe95fc4147d24150ee3c024902005f}'
+    pull_policy: '${AEGIS_DB_PULL_POLICY:-missing}'
     container_name: aegis-db
     restart: unless-stopped
     environment:
@@ -122,7 +123,6 @@ services:
       MYSQL_PASSWORD: "${NPM_DB_PASSWORD}"
     volumes:
       - ./aegis-data/db:/var/lib/mysql
-      - ./aegis-config/db-init:/docker-entrypoint-initdb.d
       - /etc/localtime:/etc/localtime:ro
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=1
@@ -130,7 +130,7 @@ services:
     networks:
       - aegis-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DB_ROOT_PASSWORD}"]
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_PASSWORD}\" mariadb --protocol=tcp -h 127.0.0.1 -u \"$${MYSQL_USER}\" \"$${MYSQL_DATABASE}\" -Nse 'SELECT 1'"]
       interval: 20s
       timeout: 10s
       retries: 5

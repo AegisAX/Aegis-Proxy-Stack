@@ -1,0 +1,13 @@
+ARG PARENT_IMAGE
+FROM ${PARENT_IMAGE}
+RUN --mount=type=bind,source=node,target=/locked,readonly --mount=type=bind,source=materialize.cjs,target=/tmp/materialize.cjs,readonly \
+    test "$(node -p "require('/locked/node_modules/npm/package.json').version")" = 12.2.3 && \
+    rm -rf /usr/lib/node_modules/npm && cp -a /locked/node_modules/npm /usr/lib/node_modules/npm && node /tmp/materialize.cjs && npm --version
+RUN --mount=type=bind,source=python,target=/locked,readonly \
+    test "$(sha256sum /locked/pip-26.3+aegis.1-py3-none-any.whl | cut -d' ' -f1)" = 9e5d8510ac362f5bd8b08294eec8fab645dc37e172350cd8ebdf91fe2358f8d2 && \
+    /opt/certbot/bin/python -m pip install --no-cache-dir --no-deps --no-index /locked/*+aegis*.whl && \
+    _PIP_USE_IMPORTLIB_METADATA=0 /opt/certbot/bin/python -m pip list --format=json >/dev/null && \
+    /opt/certbot/bin/python -m pip check && /opt/certbot/bin/certbot plugins >/dev/null
+RUN rm -r /app/frontend
+COPY frontend/ /app/frontend/
+COPY aegis-waf.js /app/internal/aegis-waf.js

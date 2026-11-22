@@ -1,0 +1,8 @@
+ARG PARENT_IMAGE
+FROM ${PARENT_IMAGE}
+RUN set -eu; fixed=/usr/lib/node_modules/npm/node_modules/tar; test "$(node -p "require('$fixed/package.json').version")" = '7.5.22'; \
+    for directory in /app/node_modules/tar /app/node_modules/node-pre-gyp/node_modules/tar; do test -f "$directory/package.json"; rm -rf "$directory"; cp -a "$fixed" "$directory"; \
+    mkdir -p "$directory/node_modules/@isaacs"; \
+    for dependency in @isaacs/fs-minipass chownr minipass minizlib yallist; do ln -s "/usr/lib/node_modules/npm/node_modules/$dependency" "$directory/node_modules/$dependency"; done; done
+COPY verify-tar.cjs /tmp/aegis-verify-tar.cjs
+RUN cd /app && node /tmp/aegis-verify-tar.cjs && rm /tmp/aegis-verify-tar.cjs

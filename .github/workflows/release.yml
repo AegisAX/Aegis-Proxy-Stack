@@ -1,0 +1,66 @@
+name: Attest a release manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Reviewed release tag
+        required: true
+        type: string
+      asset:
+        description: Manifest filename committed under releases/<tag>/
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  attest:
+    if: github.repository == 'AegisAX/Aegis-Proxy-Stack' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Check reviewed manifest and registry digests
+        id: manifest
+        env:
+          RELEASE: ${{ inputs.release }}
+          ASSET: ${{ inputs.asset }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ $RELEASE =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$ ]]
+          [[ $ASSET =~ ^aegis-(feature|security)-(v[0-9]+\.[0-9]+\.[0-9]+)-([a-f0-9]{40})\.json$ ]]
+          channel=${BASH_REMATCH[1]} version=${BASH_REMATCH[2]} revision=${BASH_REMATCH[3]}
+          path="releases/$RELEASE/$ASSET"
+          [[ $(git ls-tree "$GITHUB_SHA" -- "$path" | cut -d' ' -f1) == 100644 ]]
+          file="$RUNNER_TEMP/$ASSET"
+          git show "$GITHUB_SHA:$path" > "$file"
+          jq -es --arg channel "$channel" --arg version "$version" --arg revision "$revision" \
+            -f aegis-config/scripts/release-manifest.jq "$file" >/dev/null
+          jq -e --arg tag "$RELEASE" '.release == $tag' "$file" >/dev/null
+          if jq -e '.strategy == "stack-v1"' "$file" >/dev/null; then
+            receipt="releases/$RELEASE/qualification.json"
+            [[ $(git ls-tree "$GITHUB_SHA" -- "$receipt" | cut -d' ' -f1) == 100644 ]]
+            git show "$GITHUB_SHA:$receipt" | jq -e --slurpfile manifest "$file" \
+              -f aegis-config/scripts/qualify-release.jq >/dev/null
+          fi
+          while IFS=$'\t' read -r image config; do
+            declared=${image##*@}
+            actual=$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' | jq -er '.digest')
+            [[ $actual == "$declared" ]]
+            if [[ -n $config ]]; then
+              actual_config=$(docker buildx imagetools inspect --raw "$image" | jq -er '.config.digest')
+              [[ $actual_config == "$config" ]]
+            fi
+          done < <(jq -r '.images[] | [.target, .target_id // ""] | @tsv' "$file")
+          printf 'path=%s\n' "$file" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: ${{ steps.manifest.outputs.path }}
+          create-storage-record: false

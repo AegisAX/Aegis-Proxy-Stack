@@ -13,11 +13,14 @@ aegis-config/policy/local_policy.yaml
 node_modules/
 /package.json
 /package-lock.json
-/aegis-config/scripts/package.json
-/aegis-config/scripts/package-lock.json
 
 # 4. System Files
 .env
+.env.bak
 .DS_Store
 Thumbs.db
 VERSION
+
+/.aegis-update/
+/docker-compose.override.yml
+/aegis-config/security/verification-2026-11-21.md

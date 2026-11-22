@@ -1,0 +1,20 @@
+ARG AEGIS_NPM_SOURCE
+FROM ${AEGIS_NPM_SOURCE}
+RUN set -eu; export LC_ALL=C DEBIAN_FRONTEND=noninteractive; \
+    test "$(dpkg --print-architecture)" = amd64; \
+    work=$(mktemp -d); \
+    printf '%s\n' g++ g++-14 g++-14-x86-64-linux-gnu g++-x86-64-linux-gnu libc6-dev libstdc++-14-dev linux-libc-dev | sort > "$work/expected"; \
+    apt-get -s purge linux-libc-dev > "$work/plan"; \
+    if grep -Eq '^(Inst|Conf) ' "$work/plan"; then exit 1; fi; \
+    awk '$1=="Purg" || $1=="Remv" {print $2}' "$work/plan" | sort > "$work/planned"; \
+    diff -u "$work/expected" "$work/planned"; \
+    dpkg-query -W -f='${db:Status-Status} ${Package} ${Version}\n' | awk '$1=="installed"{print $2, $3}' | sort > "$work/before"; \
+    apt-get -o Dpkg::Use-Pty=0 -y purge linux-libc-dev; \
+    dpkg-query -W -f='${db:Status-Status} ${Package} ${Version}\n' | awk '$1=="installed"{print $2, $3}' | sort > "$work/after"; \
+    test -z "$(comm -13 "$work/before" "$work/after")"; \
+    comm -23 "$work/before" "$work/after" | cut -d' ' -f1 > "$work/removed"; \
+    diff -u "$work/expected" "$work/removed"; \
+    test ! -e /usr/include/stdio.h; \
+    test ! -e /usr/include/linux/types.h; \
+    test ! -e /usr/bin/g++; \
+    rm -r -- "$work"

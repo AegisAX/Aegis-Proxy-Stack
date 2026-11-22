@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "channel": "security",
+  "from_version": "v0.4.1",
+  "from_commit": "b28d59173f7c8ecb643dcfe0457c7f558438619a",
+  "release": "v0.4.4",
+  "strategy": "stack-v1",
+  "resolved_cves": [
+    "CVE-2023-24538",
+    "CVE-2023-24540",
+    "CVE-2023-45853",
+    "CVE-2023-6879",
+    "CVE-2024-24790",
+    "CVE-2024-56171",
+    "CVE-2025-48384",
+    "CVE-2025-68121",
+    "CVE-2025-7458",
+    "CVE-2026-111497",
+    "CVE-2026-119618",
+    "CVE-2026-123158",
+    "CVE-2026-13221",
+    "CVE-2026-23112",
+    "CVE-2026-31431",
+    "CVE-2026-31789",
+    "CVE-2026-33845",
+    "CVE-2026-42010",
+    "CVE-2026-42496",
+    "CVE-2026-43037",
+    "CVE-2026-45618",
+    "CVE-2026-46300",
+    "CVE-2026-53266",
+    "CVE-2026-53362",
+    "CVE-2026-59873",
+    "CVE-2026-60002",
+    "CVE-2026-8376",
+    "CVE-2026-90711",
+    "CVE-2026-98432",
+    "CVE-2026-99083",
+    "CVE-2026-99362"
+  ],
+  "images": {
+    "agent": {
+      "from_id": "sha256:5a8d7738240477e1e9868eb5f98d3ea9937b2e1b5dc465f32228179837087b61",
+      "target": "ghcr.io/aegisax/aegis-proxy-stack-agent@sha256:5b798df9b54a729a64064392969d634de0b7b4fbe6d4f4fab96b5c5721e32fb1",
+      "target_id": "sha256:688af57069acc05bc6389a50e47b8c7a7401a4b457681ca587c16669bcbc7e52"
+    },
+    "db": {
+      "from_id": "sha256:2180a616163b77b957bcabf4e2751ab1bcecb760fd0c93e8119f4293059dc76e",
+      "target": "ghcr.io/aegisax/aegis-proxy-stack-db@sha256:e0a3d657ab93d063ebe292091f5e8643a9303faf89673397aec6bfcb70264ea6",
+      "target_id": "sha256:01ac69580137b28229fdbbc7586d8d2fa561c90a022954aa3dbb7c331d7ce39c"
+    },
+    "log-rotator": {
+      "from_id": "sha256:83b2b6703a620bf2e001ab57f7adc414d891787b3c59859b1b62909e48dd2242",
+      "target": "ghcr.io/aegisax/aegis-proxy-stack-log@sha256:40b23b7364efda5e919612ec95df401c32c27ae064dca4d9a8ea5d9fe91fd1e2",
+      "target_id": "sha256:5efaa4b35ab37b0d6d2e678f7c6881c7d44f5ea5ee4298839a5d91707d947ac4"
+    },
+    "npm": {
+      "from_id": "sha256:f94c1504a3d0d784172057c9a535b01bf36c142be822c05d59e068881dbb64f4",
+      "target": "ghcr.io/aegisax/aegis-proxy-stack-npm@sha256:ecb27718062883a8c80a2df3c31585712ed78b97fa15bb0d30d94942cbb80b65",
+      "target_id": "sha256:4011d192e11d14783ba86f6d1b0ef935495324731e903523390ea40a7e9972e0"
+    }
+  }
+}

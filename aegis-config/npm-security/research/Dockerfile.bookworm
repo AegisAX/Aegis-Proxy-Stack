@@ -1,0 +1,20 @@
+ARG PARENT_IMAGE
+FROM ${PARENT_IMAGE}
+USER root
+RUN --mount=type=bind,source=debs,target=/locked,readonly \
+    cd /locked && sha256sum -c SHA256SUMS >/dev/null && \
+    cd / && DEBIAN_FRONTEND=noninteractive apt-get -y --no-install-recommends -o Dpkg::Options::=--force-confold install /locked/*.deb && \
+    dpkg --audit && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge 1.0.9-2+deb12u1
+RUN --mount=type=bind,source=node/node_modules,target=/locked,readonly \
+    rm -rf /app/node_modules/liquidjs /app/node_modules/proxy-addr && \
+    cp -a /locked/liquidjs /locked/proxy-addr /app/node_modules/ && \
+    mkdir -p /app/node_modules/liquidjs/node_modules /app/node_modules/proxy-addr/node_modules && \
+    cp -a /locked/commander /app/node_modules/liquidjs/node_modules/ && \
+    cp -a /locked/forwarded /locked/ipaddr.js /app/node_modules/proxy-addr/node_modules/ && \
+    cd /app && node -e "const {Liquid}=require('liquidjs');if(new Liquid().parseAndRenderSync('{{a}}',{a:'ok'})!=='ok')process.exit(1);if(!require('proxy-addr').compile('loopback')('127.0.0.1'))process.exit(1)"
+RUN --mount=type=bind,source=python,target=/locked,readonly \
+    cd /locked && sha256sum -c SHA256SUMS && \
+    /opt/certbot/bin/pip install --no-cache-dir --no-deps --no-index /locked/*.whl && \
+    /opt/certbot/bin/python -c "import certifi; assert certifi.__version__ == '2026.11.20'" && /opt/certbot/bin/certbot --version
+COPY --chmod=0755 cert-prune /usr/bin/cert-prune
+RUN cert-prune --help >/dev/null && nginx -v && node --version

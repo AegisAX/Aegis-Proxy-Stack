@@ -1,0 +1,87 @@
+name: Publish qualified stack images
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Draft release tag
+        required: true
+        type: string
+      asset:
+        description: Reviewed manifest filename committed under releases/<tag>/
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  images:
+    if: github.repository == 'AegisAX/Aegis-Proxy-Stack' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Check acceptance and download draft archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ inputs.release }}
+          ASSET: ${{ inputs.asset }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ $RELEASE =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ $ASSET =~ ^aegis-(feature|security)-(v[0-9]+\.[0-9]+\.[0-9]+)-([a-f0-9]{40})\.json$ ]]
+          channel=${BASH_REMATCH[1]} version=${BASH_REMATCH[2]} revision=${BASH_REMATCH[3]}
+          folder="releases/$RELEASE"
+          manifest="$folder/$ASSET"
+          for file in "$manifest" "$folder/qualification.json" "$folder/archives.json"; do
+            [[ $(git ls-tree HEAD -- "$file" | cut -d' ' -f1) == 100644 ]]
+          done
+          jq -es --arg channel "$channel" --arg version "$version" --arg revision "$revision" \
+            -f aegis-config/scripts/release-manifest.jq "$manifest" >/dev/null
+          jq -e --arg tag "$RELEASE" '.strategy == "stack-v1" and .release == $tag' "$manifest" >/dev/null
+          jq -e --slurpfile manifest "$manifest" -f aegis-config/scripts/qualify-release.jq \
+            "$folder/qualification.json" >/dev/null
+          gh release view "$RELEASE" --json isDraft --jq .isDraft | grep -qx true
+
+          install -d -m 700 "$RUNNER_TEMP/aegis-images"
+          work="$RUNNER_TEMP/aegis-images"
+          for service in agent db npm log-rotator; do
+            name=$service
+            [[ $name != log-rotator ]] || name=log
+            id=$(jq -er --arg service "$service" '.images[$service].target_id' "$manifest")
+            ref=$(jq -er --arg service "$service" '.images[$service].target' "$manifest")
+            [[ $ref =~ ^ghcr\.io/aegisax/aegis-proxy-stack-$name@sha256:[a-f0-9]{64}$ ]]
+            archive="$name-${id#sha256:}.tar.gz"
+            checksum=$(jq -er --arg service "$service" '.[$service] | select(test("^[a-f0-9]{64}$"))' "$folder/archives.json")
+            gh release download "$RELEASE" --pattern "$archive" --dir "$work"
+            printf '%s  %s\n' "$checksum" "$work/$archive" | sha256sum -c -
+            printf '%s\t%s\t%s\n' "$work/$archive" "$ref" "$id" >> "$work/images.tsv"
+          done
+      - name: Push archives without changing image digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ inputs.release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends skopeo
+          work="$RUNNER_TEMP/aegis-images"
+          auth="$work/auth.json"
+          printf '%s' "$GH_TOKEN" | skopeo login --authfile "$auth" --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+          trap 'rm -f -- "$auth"' EXIT
+          while IFS=$'\t' read -r archive ref id; do
+            raw=$(skopeo inspect --raw "oci-archive:$archive")
+            # Command substitution strips trailing newlines. Hash the original manifest bytes.
+            actual=$(skopeo inspect --raw "oci-archive:$archive" | sha256sum)
+            [[ ${actual%% *} == "${ref##*@}" ]]
+            [[ $(jq -er '.config.digest' <<< "$raw") == "$id" ]]
+            skopeo copy --authfile "$auth" --preserve-digests "oci-archive:$archive" "docker://${ref%@*}:$RELEASE"
+            remote=$(skopeo inspect --authfile "$auth" --raw "docker://$ref" | sha256sum)
+            [[ ${remote%% *} == "${ref##*@}" ]]
+          done < "$work/images.tsv"

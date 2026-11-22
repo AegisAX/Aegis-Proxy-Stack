@@ -1,0 +1,6 @@
+{
+  "name": "aegis-policy-controller",
+  "private": true,
+  "engines": { "node": ">=18" },
+  "dependencies": { "js-yaml": "4.3.2" }
+}

@@ -1,0 +1,33 @@
+#!/bin/sh
+# Alpine BusyBox ash supports pipefail. Preserve the parser and logrotate statuses.
+set -eu
+set -o pipefail
+export LC_ALL=C
+config=/usr/local/etc/aegis/logrotate.conf
+
+fail() { printf '%s\n' "$1" >&2; exit 1; }
+case "$#:${1:-}" in
+    0:) ;;
+    1:--health) pidof crond >/dev/null || fail 'crond is not running' ;;
+    *) fail 'Usage: aegis-check-logrotate [--health]' ;;
+esac
+
+[ -f "$config" ] && [ ! -L "$config" ] && [ "$(stat -c '%u:%g:%a' "$config")" = 0:0:644 ] ||
+    fail 'The baked logrotate configuration has unexpected ownership or mode'
+[ ! -e /etc/periodic/daily/logrotate ] && [ ! -L /etc/periodic/daily/logrotate ] ||
+    fail 'A second daily logrotate schedule is installed'
+awk -v expected="0 0 * * * /usr/sbin/logrotate -v $config" '
+    /^[[:space:]]*#/ { next }
+    /(^|[[:space:]\/])logrotate([[:space:]]|$)/ { jobs++; if ($0 == expected) matched++ }
+    END { exit !(jobs == 1 && matched == 1) }
+' /etc/crontabs/root || fail 'The midnight logrotate command is missing or duplicated'
+
+/usr/sbin/logrotate --debug --state /dev/null "$config" 2>&1 | awk '
+    /(^|[[:space:]])error:/ { bad = 1 }
+    $1 == "Handling" && $2 ~ /^[1-9][0-9]*$/ && $3 ~ /^logs?$/ { handling++ }
+    $1 == "rotating" && $2 == "pattern:" {
+        if ($3 == "/var/log/target/npm/*.log") npm++
+        if ($3 == "/var/log/target/waf/*.log") waf++
+    }
+    END { exit !(handling == 1 && npm == 1 && waf == 1 && !bad) }
+' || fail 'logrotate did not accept both NPM and WAF log rules'

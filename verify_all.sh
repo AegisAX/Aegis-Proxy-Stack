@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 
 # ==============================================================================
 # Aegis-Proxy-Stack Verifier
@@ -70,20 +71,13 @@ check_dependencies() {
         exit 1
     fi
 
-    # axios 모듈 확인 (로컬 디렉토리 기준)
-    if [ ! -d "node_modules/axios" ]; then
-        echo -e "\n   WARN  Required module 'axios' is missing."
-        read -p "         Would you like to install 'axios' now? (y/n): " INSTALL_AXIOS
-        if [[ $INSTALL_AXIOS =~ ^[yY] ]]; then
-            npm install axios >/dev/null 2>&1
-            echo "   DONE  'axios' installed successfully."
-        else
-            echo "   FAIL  Verification aborted. 'axios' is required."
-            exit 1
-        fi
-    else
-        echo -e "\r   DONE  Node.js & Modules are ready.      "
-    fi
+    node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' ||
+        { echo "Node.js 18+ is required."; exit 1; }
+    (cd aegis-config/scripts && node -e '
+        const expected = require("./package.json").dependencies["js-yaml"];
+        process.exit(require("./node_modules/js-yaml/package.json").version === expected ? 0 : 1);
+    ' 2>/dev/null) || npm ci --ignore-scripts --no-fund --prefix aegis-config/scripts || exit 1
+    echo -e "\r   DONE  Node.js & Modules are ready.      "
 }
 
 log_step() {
@@ -156,16 +150,13 @@ execute_with_spinner() {
 
 # --- [Main Script Start] ---
 
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")" || exit 1
 print_banner
 check_dependencies
 
 # ------------------------------------------------------------------------------
 # 0. Load Configuration & Initialize Credentials
 # ------------------------------------------------------------------------------
-if [ -f ".env" ]; then
-    export $(grep -v '^#' .env | xargs)
-fi
-
 # Initialize with environment variables if passed
 NPM_USER="${MASTER_EMAIL:-}"
 NPM_PASS="${MASTER_PASSWORD:-}"
@@ -174,14 +165,14 @@ NPM_PASS="${MASTER_PASSWORD:-}"
 if [ -z "$NPM_USER" ] || [ -z "$NPM_PASS" ]; then
     while true; do
         log_input "Enter NPM Admin Email:"
-        read -r NPM_USER
+        read -r NPM_USER || exit 1
         echo ""
         if [ -n "$NPM_USER" ]; then break; fi
     done
 
     while true; do
         log_input "Enter NPM Admin Password:"
-        read -rs NPM_PASS
+        read -rs NPM_PASS || exit 1
         echo ""
         echo ""
         if [ -n "$NPM_PASS" ]; then break; fi
@@ -203,7 +194,8 @@ if docker compose ps agent | grep -q "Up"; then
     
     echo -e "   ${TXT_WHITE}[ open-appsec Agent Status ]${RESET}"
     echo -e "   ${TXT_GRAY}------------------------------------------------${RESET}"
-    docker compose exec agent open-appsec-ctl --status
+    docker compose exec -T agent open-appsec-ctl --status ||
+        { log_error "Could not retrieve open-appsec status."; exit 1; }
     echo ""
     
     log_success "Agent container is running and accessible."
@@ -218,7 +210,12 @@ fi
 # ------------------------------------------------------------------------------
 log_step 2 "NPM Authentication & Policy Sync"
 
-NPM_API="http://localhost:81/api"
+admin_address=$(docker compose port npm 81) || exit 1
+case "$admin_address" in
+    0.0.0.0:*) admin_address="127.0.0.1:${admin_address##*:}" ;;
+    '[::]:'*) admin_address="[::1]:${admin_address##*:}" ;;
+esac
+NPM_API="http://$admin_address/api"
 
 # 2-1. Service Wait
 check_api() {
@@ -239,11 +236,8 @@ execute_with_spinner "Waiting for NPM API (max 180s)..." check_api || { log_erro
 get_token() {
     local u=$1
     local p=$2
-    export _JQ_USER="$u"
-    export _JQ_PASS="$p"
-    local payload=$(jq -n '{identity: env._JQ_USER, secret: env._JQ_PASS}')
-    curl -s -X POST "$NPM_API/tokens" -H "Content-Type: application/json" -d "$payload"
-    unset _JQ_USER _JQ_PASS
+    printf '%s' "$p" | jq -Rsc --arg u "$u" '{identity:$u,secret:.}' |
+        curl -sS --max-time 15 -X POST "$NPM_API/tokens" -H "Content-Type: application/json" --data-binary @-
 }
 
 # 2-2. Authenticate (Loop until success)
@@ -266,14 +260,14 @@ while true; do
         
         while true; do
             log_input "Enter NPM Admin Email:"
-            read -r NPM_USER
+            read -r NPM_USER || exit 1
             echo ""
             if [ -n "$NPM_USER" ]; then break; fi
         done
 
         while true; do
             log_input "Enter NPM Admin Password:"
-            read -rs NPM_PASS
+            read -rs NPM_PASS || exit 1
             echo ""
             echo ""
             if [ -n "$NPM_PASS" ]; then break; fi
@@ -281,42 +275,14 @@ while true; do
     fi
 done
 
-# 2-3. Register Test Host (with FORCE Update)
-log_task "Registering Test Host (test.aegis.local)..."
-
-if [ -n "$TOKEN" ]; then
-    PAYLOAD=$(jq -n '{
-      domain_names: ["test.aegis.local"],
-      forward_scheme: "http",
-      forward_host: "127.0.0.1",
-      forward_port: 81,
-      access_list_id: "0",
-      certificate_id: 0,
-      ssl_forced: false,
-      meta: { openappsec: { enabled: true, mode: "prevent-learn", minimum_confidence: "medium" } },
-      advanced_config: "",
-      locations: [],
-      block_exploits: false
-    }')
-    
-    EXIST_HOST=$(curl -s -X GET "$NPM_API/nginx/proxy-hosts" -H "Authorization: Bearer $TOKEN" | jq -r '.[] | select(.domain_names[] | contains("test.aegis.local"))')
-    
-    if [ -z "$EXIST_HOST" ]; then
-        curl -s -o /dev/null -X POST "$NPM_API/nginx/proxy-hosts" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD"
-        log_success "Host Registered (Mode: Prevent-Learn)."
-    else
-        HOST_ID=$(echo "$EXIST_HOST" | jq -r '.id')
-        curl -s -o /dev/null -X PUT "$NPM_API/nginx/proxy-hosts/$HOST_ID" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD"
-        log_success "Host Updated: Enforced 'Prevent-Learn' Mode."
-    fi
-else
-    log_error "Authentication failed. Cannot register host."
+# Check deployments previously verified with a public proxy to the management listener.
+hosts=$(curl -fsS --max-time 15 "$NPM_API/nginx/proxy-hosts" -H "Authorization: Bearer $TOKEN") || exit 1
+if ! legacy_admin=$(jq -er 'if type == "array" then
+    [.[] | select(.enabled != false and .enabled != 0 and (.domain_names | index("test.aegis.local")) and
+    (.forward_port | tostring) == "81" and (.forward_host | IN("127.0.0.1","localhost","::1","npm","aegis-npm")))] | length
+    else error("Invalid proxy host inventory") end' <<< "$hosts"); then exit 1; fi
+if (( legacy_admin )); then
+    log_error "The legacy test.aegis.local proxy still forwards to the admin listener. Review this host in NPM."
     exit 1
 fi
 
@@ -330,9 +296,6 @@ export NPM_API="$NPM_API"
 export APPSEC_MODE="prevent-learn"      # [Config] Mode
 export APPSEC_CONFIDENCE="medium"       # [Config] Confidence
 export POLICY_FILE="../policy/local_policy.yaml"
-
-# Node Path Setup
-export NODE_PATH="./aegis-config/scripts/node_modules"
 
 # Check if script exists
 SCRIPT_PATH="aegis-config/scripts/policy_generator.js"
@@ -353,102 +316,32 @@ if [ $CD_RES -ne 0 ]; then
 fi
 echo "" 
 
-# Apply Policy
-execute_with_spinner "Applying WAF Policy (Reloading)..." "docker compose exec -T agent open-appsec-ctl --apply-policy /etc/cp/conf/local_policy.yaml"
+# Use the same file shared with NPM and propagate a failed reload.
+execute_with_spinner "Applying WAF policy..." "docker compose exec -T agent open-appsec-ctl --apply-policy /ext/appsec/local_policy.yaml" || exit 1
+docker compose exec -T npm nginx -t || exit 1
+log_success "NPM authentication, NGINX configuration and WAF policy reload passed."
 
-
-# ------------------------------------------------------------------------------
-# 3. Security Function Verification
-# ------------------------------------------------------------------------------
-log_step 3 "Security Function Verification (WAF Test)"
-
-TEST_URL="http://test.aegis.local/?id=1%27%20OR%20%271%27=%271"
-RESOLVE="test.aegis.local:80:127.0.0.1"
-
-# --- [Smart Wait Logic: Activation + Stability Check] ---
-tput civis # Hide cursor
-spinstr='|/-\'
-WAF_READY=false
-CONSECUTIVE_SUCCESS=0
-TARGET_SUCCESS=3 # Need 3 consecutive blocks
-MAX_WAIT=300     # 300 checks
-
-for ((i=1; i<=MAX_WAIT; i++)); do
-    temp=${spinstr#?}
-    
-    if [ $CONSECUTIVE_SUCCESS -eq 0 ]; then
-        MSG="Waiting for WAF Engine activation..."
-    else
-        MSG="Verifying Stability... ($CONSECUTIVE_SUCCESS/$TARGET_SUCCESS)"
-    fi
-    
-    printf "\r   ${BG_MAGENTA}${TXT_WHITE}${BOLD}  %c  ${RESET} %s" "$spinstr" "$MSG"
-    spinstr=$temp${spinstr%"$temp"}
-    
-    CODE=$(curl --no-keepalive -s -o /dev/null -w "%{http_code}" --resolve "$RESOLVE" "$TEST_URL")
-    
-    if [ "$CODE" == "403" ]; then
-        CONSECUTIVE_SUCCESS=$((CONSECUTIVE_SUCCESS+1))
-    else
-        CONSECUTIVE_SUCCESS=0
-    fi
-    
-    if [ $CONSECUTIVE_SUCCESS -ge $TARGET_SUCCESS ]; then
-        WAF_READY=true
-        break
-    fi
-    
-    sleep 1
-done
-
-tput cnorm
-printf "\r\033[K" # Clear line
-
-if [ "$WAF_READY" = true ]; then
-    echo -e "   ${BG_GREEN}${TXT_WHITE}${BOLD} DONE ${RESET} WAF Engine Active & Stable (Ready)."
-else
-    log_warn "WAF Block verification timed out or unstable (Last HTTP: $CODE)."
+# Optional end-to-end verification uses the operator's existing HTTPS test host and benign paths.
+host=${AEGIS_VERIFY_HOST:-}
+allowed=${AEGIS_VERIFY_ALLOW_PATH:-}
+denied=${AEGIS_VERIFY_DENY_PATH:-}
+if [[ -z $host && -z $allowed && -z $denied ]]; then
+    log_info "End-to-end WAF blocking was not tested. Set AEGIS_VERIFY_HOST, AEGIS_VERIFY_ALLOW_PATH and AEGIS_VERIFY_DENY_PATH to test an existing policy."
+    exit 0
 fi
-echo ""
-
-# 2. Final Security Tests
-TEST_FAILED=0
-
-# Test 1: Normal Access
-HTTP_CODE_NORMAL=$(curl --no-keepalive -s -o /dev/null -w "%{http_code}" --resolve "$RESOLVE" "http://test.aegis.local/")
-if [[ "$HTTP_CODE_NORMAL" == "200" || "$HTTP_CODE_NORMAL" == "302" ]]; then
-    log_success "Normal Traffic: Allowed (HTTP $HTTP_CODE_NORMAL)"
-else
-    log_error "Normal Traffic: Blocked/Failed (HTTP $HTTP_CODE_NORMAL)"
-    TEST_FAILED=1
+if [[ ! $host =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ || ! $allowed =~ ^/[a-zA-Z0-9_./-]*$ ||
+      ! $denied =~ ^/[a-zA-Z0-9_./-]*$ || $denied == "$allowed" ]]; then
+    log_error "Provide a hostname and two distinct plain paths for the allow and deny checks."
+    exit 1
 fi
-
-# Test 2: XSS
-HTTP_CODE_XSS=$(curl --no-keepalive -s -o /dev/null -w "%{http_code}" --resolve "$RESOLVE" "http://test.aegis.local/?q=<script>alert(1)</script>")
-if [ "$HTTP_CODE_XSS" == "403" ]; then
-    log_success "XSS Attack: Blocked (HTTP 403)"
+probe() {
+    curl --silent --show-error --max-time 10 --noproxy '*' --resolve "$host:443:127.0.0.1" \
+        --output /dev/null --write-out '%{http_code}' "https://$host$1"
+}
+allow_code=$(probe "$allowed") && deny_code=$(probe "$denied") || exit 1
+if [[ $allow_code == 200 && $deny_code == 403 ]]; then
+    log_success "HTTPS test host returned 200 on the allow path and 403 on the deny path."
 else
-    log_error "XSS Attack: Failed (HTTP $HTTP_CODE_XSS)"
-    TEST_FAILED=1
+    log_error "Expected HTTP 200/403. Received $allow_code/$deny_code."
+    exit 1
 fi
-
-# Test 3: SQLi
-HTTP_CODE_SQLI=$(curl --no-keepalive -s -o /dev/null -w "%{http_code}" --resolve "$RESOLVE" "$TEST_URL")
-if [ "$HTTP_CODE_SQLI" == "403" ]; then
-    log_success "SQL Injection: Blocked (HTTP 403)"
-else
-    log_error "SQL Injection: Failed (HTTP $HTTP_CODE_SQLI)"
-    TEST_FAILED=1
-fi
-
-echo ""
-echo -e "${TXT_BLUE}################################################################${RESET}"
-if [ $TEST_FAILED -eq 0 ]; then
-    echo -e "   ${TXT_GREEN}[ SUCCESS ]${RESET} All checks passed successfully!"
-    echo -e "   ${TXT_WHITE}NPM Dashboard:${RESET} http://localhost:81"
-    echo -e "   ${TXT_WHITE}Admin ID:${RESET}      $NPM_USER"
-else
-    echo -e "   ${TXT_YELLOW}[ WARNING ]${RESET} Some security checks failed."
-    echo -e "               Check logs: 'docker compose logs agent'"
-fi
-echo -e "${TXT_BLUE}################################################################${RESET}"

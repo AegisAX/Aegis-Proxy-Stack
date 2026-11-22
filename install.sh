@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 
 # ==============================================================================
 # Aegis-Proxy-Stack Installer
@@ -132,25 +133,20 @@ execute_with_spinner() {
 # --- [Main Script Start] ---
 
 print_banner
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")" || exit 1
 
 # ------------------------------------------------------------------------------
 # 0. Check Prerequisites
 # ------------------------------------------------------------------------------
-if ! command -v npm >/dev/null 2>&1; then
-    echo "⚠️  npm이 설치되어 있지 않습니다. Node.js를 먼저 설치해주세요."
-else
-    echo "📦 필수 라이브러리(axios)를 설치합니다..."
-    npm install axios --save-dev >/dev/null 2>&1
-    echo "✅ 라이브러리 설치 완료"
-fi
-
-for pkg in jq curl node; do
+for pkg in jq curl node npm docker; do
     if ! command -v $pkg &> /dev/null; then
         log_error "Missing required package: '$pkg'"
         echo -e "            Please install it first (e.g., sudo apt install $pkg)"
         exit 1
     fi
 done
+node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' ||
+    { log_error "Node.js 18+ is required."; exit 1; }
 
 if [ ! -f "docker-compose.yml" ]; then
     log_error "File not found: docker-compose.yml"
@@ -162,9 +158,14 @@ fi
 # ------------------------------------------------------------------------------
 log_step 1 "Initializing Data Directories"
 
-if [ -d "aegis-data/db" ] && [ "$(ls -A aegis-data/db)" ]; then
-    log_warn "Existing database detected."
-    echo "            (To reinstall cleanly, run 'docker compose down' and 'sudo rm -rf aegis-data')"
+if [[ -L .env || ( -e .env && ! -f .env ) ]]; then
+    log_error "Expected a regular .env file."; exit 1
+fi
+if [[ ! -f .env && -e aegis-data/db ]]; then
+    if ! entries=$(ls -A -- aegis-data/db) || [[ -n $entries || ! -d aegis-data/db || -L aegis-data/db ]]; then
+        log_error "Existing or unreadable database detected. Restore its matching .env before starting."
+        exit 1
+    fi
 fi
 
 mkdir -p aegis-config/agent
@@ -172,8 +173,8 @@ mkdir -p aegis-config/scripts
 mkdir -p aegis-config/policy
 
 if [ ! -f "aegis-config/policy/local_policy.yaml" ]; then
-    touch aegis-config/policy/local_policy.yaml
-    log_task "Created placeholder policy file."
+    install -m 0640 aegis-config/policy/local_policy.yaml.template aegis-config/policy/local_policy.yaml || exit 1
+    log_task "Initialized WAF policy from the project template."
 fi
 
 if [ -f "aegis-config/advanced-model/open-appsec-advanced-model.tgz" ]; then
@@ -181,13 +182,11 @@ if [ -f "aegis-config/advanced-model/open-appsec-advanced-model.tgz" ]; then
     log_task "Secured Advanced ML Model binary."
 fi
 
-mkdir -p aegis-data/{certs,db,learning,npm}
-mkdir -p aegis-logs/{npm,waf}
+mkdir -p -m 0750 aegis-data aegis-logs || exit 1
+mkdir -p -m 0750 aegis-data/{certs,db,learning,npm} || exit 1
+mkdir -p -m 0755 aegis-logs/{npm,waf} || exit 1
 log_task "Created data and log directories."
 
-# Allow directory traversal without adding execute permission to regular files.
-chmod -R u=rwX,g=rX,o= aegis-config aegis-data aegis-logs
-log_success "Configuration, data, and log permissions set."
 
 
 # ------------------------------------------------------------------------------
@@ -195,12 +194,12 @@ log_success "Configuration, data, and log permissions set."
 # ------------------------------------------------------------------------------
 log_step 2 "Unified Configuration Setup"
 
-echo -e "   ${TXT_GRAY}Note: This email and password will be used for ALL services.${RESET}\n"
+echo -e "   ${TXT_GRAY}Enter the NPM administrator account. New installations generate separate database credentials.${RESET}\n"
 
 # 1. Master Email Input
 while true; do
-    log_input "Enter Master Email (ID):"
-    read -r MASTER_EMAIL
+    log_input "NPM administrator email:"
+    read -r MASTER_EMAIL || exit 1
     echo "" # Spacing after input
     
     if [[ "$MASTER_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
@@ -213,19 +212,19 @@ done
 
 # 2. Master Password Input (With Verification)
 while true; do
-    log_input "Enter Master Password:"
-    read -rs MASTER_PASS_1
+    log_input "NPM administrator password:"
+    read -rs MASTER_PASS_1 || exit 1
     echo "" # Newline for hidden input
     echo "" # Spacing gap
 
-    if [ -z "$MASTER_PASS_1" ]; then
-        log_warn "Password cannot be empty."
+    if [[ -z $MASTER_PASS_1 || $MASTER_PASS_1 == changeme ]]; then
+        log_warn "Enter a password other than the factory default."
         echo ""
         continue
     fi
 
-    log_input "Confirm Master Password:"
-    read -rs MASTER_PASS_2
+    log_input "Confirm NPM administrator password:"
+    read -rs MASTER_PASS_2 || exit 1
     echo "" # Newline for hidden input
     echo "" # Spacing gap
 
@@ -240,7 +239,6 @@ while true; do
 done
 
 INPUT_EMAIL="$MASTER_EMAIL"
-INPUT_DB_ROOT="$MASTER_PASSWORD"
 INPUT_NPM_PASS="$MASTER_PASSWORD"
 
 
@@ -249,21 +247,37 @@ INPUT_NPM_PASS="$MASTER_PASSWORD"
 # ------------------------------------------------------------------------------
 log_step 3 "Generating Environment Files"
 
-if [ -f ".env" ]; then
-    cp .env .env.bak
+if [[ -f .env ]]; then
+    chmod go-rwx .env || exit 1
+    log_info "Using existing .env and database credentials."
+else
+    (
+        set -eu
+        umask 077
+        tmp=$(mktemp ./.env.install.XXXXXXXX) || exit 1
+        trap 'rm -f -- "$tmp"' EXIT
+        node - "$INPUT_EMAIL" > "$tmp" <<'NODE' || exit 1
+const { randomBytes } = require('node:crypto');
+const password = () => randomBytes(32).toString('hex');
+console.log('AGENT_EMAIL=' + process.argv[2]);
+console.log('DB_ROOT_PASSWORD=' + password());
+console.log('NPM_DB_PASSWORD=' + password());
+console.log('NPM_ADMIN_BIND=127.0.0.1');
+NODE
+        services=$(docker compose --env-file "$tmp" config --services) || exit 1
+        if grep -Fxq db <<< "$services"; then
+            db_image=$(bash aegis-config/db-security/prepare.sh) || exit 1
+            [[ $db_image =~ ^aegis-mariadb:local-[a-f0-9]{64}$ ]] || exit 1
+            printf 'AEGIS_DB_IMAGE=%s\nAEGIS_DB_PULL_POLICY=never\n' "$db_image" >> "$tmp" || exit 1
+        fi
+        ln -- "$tmp" .env
+    ) || { log_error "Could not create .env."; exit 1; }
+    log_success "Generated independent database credentials in .env."
 fi
 
-cat <<EOF > .env
-# [Aegis-Proxy-Stack Environment Variables]
-AGENT_EMAIL=${INPUT_EMAIL}
-DB_ROOT_PASSWORD=${INPUT_DB_ROOT}
-NPM_DB_PASSWORD=${INPUT_NPM_PASS}
-EOF
-chmod 600 .env
-log_success ".env file generated."
-
-echo "$RELEASE_VERSION" > VERSION
-log_success "VERSION file generated ($RELEASE_VERSION)."
+if [[ ! -s VERSION ]]; then
+    printf '%s\n' "$RELEASE_VERSION" > VERSION || exit 1
+fi
 
 
 # ------------------------------------------------------------------------------
@@ -280,10 +294,22 @@ else
     log_success "Found policy_generator.js."
 fi
 
-log_task "Installing NPM dependencies (axios, js-yaml, lodash)..."
-npm install axios js-yaml lodash --prefix aegis-config/scripts --silent >/dev/null 2>&1
+log_task "Installing locked policy controller dependencies..."
+npm ci --ignore-scripts --no-fund --prefix aegis-config/scripts || exit 1
 log_success "Policy Controller dependencies installed."
 
+if [[ ! -e docker-compose.override.yml && ! -L docker-compose.override.yml && ! -e .aegis-update/pending.json ]]; then
+    # A resumed first install can already have .env but no initialized DB or services.
+    existing=$(docker compose ps --all --quiet) || exit 1
+    if [[ -z $existing ]] && entries=$(ls -A -- aegis-data/db) && [[ -z $entries ]]; then
+        config="$PWD/aegis-config/logrotate/aegis-rotate.conf"
+        if [[ -f $config && ! -L $config && -O $config && $(stat -c %h -- "$config") == 1 ]]; then
+            chmod go-w -- "$config" || exit 1
+        fi
+        bash aegis-config/logrotate/prepare.sh --install \
+            "$config" "$PWD/docker-compose.override.yml" || exit 1
+    fi
+fi
 
 # ------------------------------------------------------------------------------
 # 5. Docker Service Startup & Account Config
@@ -292,13 +318,19 @@ log_step 5 "Docker Service Startup & Configuration"
 
 while true; do
     log_input "Start services now? (Y/n):"
-    read -r CONFIRM
+    read -r CONFIRM || exit 1
     echo "" 
     CONFIRM=${CONFIRM:-Y}
     case $CONFIRM in
         [yY]*)
             echo -e "   ${TXT_YELLOW}🔄 Starting Docker Compose...${RESET}"
-            docker compose up -d
+            compose=(docker compose -f docker-compose.yml)
+            [[ ! -f docker-compose.override.yml ]] || compose+=(-f docker-compose.override.yml)
+            [[ ! -f .aegis-update/images.json ]] || compose+=(-f .aegis-update/images.json)
+            if [[ -e .aegis-update/pending.json ]]; then
+                log_error "Recover the unfinished update before starting services."; exit 1
+            fi
+            "${compose[@]}" up -d
             if [ $? -ne 0 ]; then log_error "Docker launch failed."; exit 1; fi
             
             echo ""
@@ -306,7 +338,13 @@ while true; do
             
             # --- [CRITICAL FIX: Initial Account Configuration] ---
             # Wait for NPM API
-            NPM_API="http://localhost:81/api"
+            published_admin=$("${compose[@]}" port npm 81) || exit 1
+            admin_address=$published_admin
+            case "$admin_address" in
+                0.0.0.0:*) admin_address="127.0.0.1:${admin_address##*:}" ;;
+                '[::]:'*) admin_address="[::1]:${admin_address##*:}" ;;
+            esac
+            NPM_API="http://$admin_address/api"
             check_api() {
                 local count=0
                 while [ $count -lt 90 ]; do
@@ -323,63 +361,55 @@ while true; do
             # Helper to get token
             get_token() {
                 local u=$1; local p=$2
-                curl -s -X POST "$NPM_API/tokens" \
+                printf '%s' "$p" | jq -Rsc --arg u "$u" '{identity:$u, secret:.}' |
+                    curl -sS --max-time 15 -X POST "$NPM_API/tokens" \
                     -H "Content-Type: application/json" \
-                    -d "{\"identity\":\"$u\",\"secret\":\"$p\"}"
+                    --data-binary @-
             }
-            
-            # 1. Login with DEFAULT credentials
-            log_task "Configuring Admin Account..."
-            DEFAULT_USER="admin@example.com"
-            DEFAULT_PASS="changeme"
-            
-            # Try Default Login
-            RAW_RES=$(get_token "$DEFAULT_USER" "$DEFAULT_PASS")
-            TOKEN=$(echo "$RAW_RES" | jq -r '.token // empty')
-            
-            if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
-                # 2. Change Password
-                PW_PAYLOAD=$(jq -n --arg s "$INPUT_NPM_PASS" --arg c "$DEFAULT_PASS" '{type: "password", secret: $s, current: $c}')
-                curl -s -o /dev/null -X PUT "$NPM_API/users/1/auth" \
-                    -H "Authorization: Bearer $TOKEN" \
-                    -H "Content-Type: application/json" \
-                    -d "$PW_PAYLOAD"
-                
-                # 3. Change Email/Name (Re-login required? usually token is still valid for user update)
-                # Re-login with NEW password to be safe and verify change
-                RAW_RES_2=$(get_token "$DEFAULT_USER" "$INPUT_NPM_PASS")
-                TOKEN_2=$(echo "$RAW_RES_2" | jq -r '.token // empty')
-                
-                if [ -n "$TOKEN_2" ]; then
-                    UPDATE_PAYLOAD=$(jq -n --arg e "$INPUT_EMAIL" '{name: "Administrator", nickname: "Admin", email: $e}')
-                    curl -s -o /dev/null -X PUT "$NPM_API/users/1" \
-                        -H "Authorization: Bearer $TOKEN_2" \
-                        -H "Content-Type: application/json" \
-                        -d "$UPDATE_PAYLOAD"
-                    log_success "Admin account updated to: $INPUT_EMAIL"
-                else
-                    log_error "Failed to verify new password."
-                    exit 1
-                fi
-            else
-                # Login failed. Assuming already configured?
-                # Try logging in with the Master Password provided
-                RAW_RES_CHECK=$(get_token "$INPUT_EMAIL" "$INPUT_NPM_PASS")
-                TOKEN_CHECK=$(echo "$RAW_RES_CHECK" | jq -r '.token // empty')
-                
-                if [ -n "$TOKEN_CHECK" ]; then
-                    log_success "Account already configured. Skipping setup."
-                else
-                    log_warn "Could not login with default OR new credentials. Check logs."
-                fi
+
+            # NPM 2.13+ exposes first-user setup on the admin listener.
+            setup=$(curl -fsS --max-time 10 "$NPM_API/" | jq -r 'if has("setup") then .setup|tostring else "legacy" end') ||
+                { log_error "Could not determine NPM setup state."; exit 1; }
+            if [[ $setup == false ]]; then
+                case "$published_admin" in
+                    127.*:*|'[::1]:'*) ;;
+                    *) log_error "Complete first-user setup on a loopback listener."; exit 1 ;;
+                esac
+                printf '%s' "$INPUT_NPM_PASS" | jq -Rsc --arg email "$INPUT_EMAIL" \
+                    '{name:"Administrator",nickname:"Admin",email:$email,auth:{type:"password",secret:.}}' |
+                    curl -fsS --max-time 20 -o /dev/null "$NPM_API/users" -H 'Content-Type: application/json' \
+                    --data-binary @- || { log_error "Could not create the first NPM administrator."; exit 1; }
             fi
             
-            echo ""
+            token_for() {
+                get_token "$1" "$2" | jq -er '.token | select(type == "string" and length > 0)'
+            }
+            log_task "Verifying the NPM administrator..."
+            if ! token_for "$INPUT_EMAIL" "$INPUT_NPM_PASS" >/dev/null; then
+                [[ $setup == legacy ]] || { log_error "Could not verify the administrator."; exit 1; }
+                DEFAULT_USER="admin@example.com"
+                DEFAULT_PASS="changeme"
+                # A previous run can have changed the password before updating the email.
+                if ! token=$(token_for "$DEFAULT_USER" "$INPUT_NPM_PASS"); then
+                    token=$(token_for "$DEFAULT_USER" "$DEFAULT_PASS") ||
+                        { log_error "Could not verify the NPM administrator."; exit 1; }
+                    printf '%s' "$INPUT_NPM_PASS" | jq -Rsc --arg c "$DEFAULT_PASS" '{type:"password",secret:.,current:$c}' |
+                        curl -fsS --max-time 15 -o /dev/null -X PUT "$NPM_API/users/1/auth" \
+                        -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary @- || exit 1
+                    token=$(token_for "$DEFAULT_USER" "$INPUT_NPM_PASS") || exit 1
+                fi
+                jq -nc --arg e "$INPUT_EMAIL" '{name:"Administrator",nickname:"Admin",email:$e}' |
+                    curl -fsS --max-time 15 -o /dev/null -X PUT "$NPM_API/users/1" \
+                    -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary @- || exit 1
+                token_for "$INPUT_EMAIL" "$INPUT_NPM_PASS" >/dev/null ||
+                    { log_error "Could not verify the configured administrator."; exit 1; }
+            fi
+            log_success "NPM administrator login verified."
             log_success "Installation Complete."
             
             # --- [Launch Verification] ---
             log_input "Run verification script (verify_all.sh) now? (Y/n):"
-            read -r RUN_VERIFY
+            read -r RUN_VERIFY || exit 0
             echo ""
             RUN_VERIFY=${RUN_VERIFY:-Y}
             
@@ -388,7 +418,7 @@ while true; do
                     chmod +x ./verify_all.sh
                     # Pass credentials to verify script
                     export MASTER_EMAIL="$INPUT_EMAIL"
-                    export MASTER_PASSWORD="$INPUT_DB_ROOT"
+                    export MASTER_PASSWORD="$INPUT_NPM_PASS"
                     ./verify_all.sh
                 else
                     log_error "verify_all.sh not found."

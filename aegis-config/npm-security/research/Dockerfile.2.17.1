@@ -1,0 +1,20 @@
+FROM jc21/nginx-proxy-manager@sha256:ddccef5311d962ce733bc3439f9efdc11f167888804e60c5912f8a37ecdc5d52
+USER root
+RUN test "$(apt-get -s remove openssh-client | awk '$1 == "Remv" {print $2}')" = openssh-client && \
+    DEBIAN_FRONTEND=noninteractive apt-get -y --no-download remove openssh-client && \
+    ! command -v ssh && ! command -v sshd
+COPY modules/libngx_module.so /usr/lib/nginx/modules/
+COPY modules/usrlib/ /usr/lib/
+COPY modules/notices/ /usr/share/doc/aegis-openappsec-attachment/
+RUN mkdir -p /etc/nginx/modules && printf '%s\n' 'load_module /usr/lib/nginx/modules/libngx_module.so;' >/etc/nginx/modules/openappsec.conf && \
+    test "$(grep -cx 'http {' /etc/nginx/nginx.conf)" = 1 && sed -i '/^http {/a\    cp_worker_processes auto;' /etc/nginx/nginx.conf
+COPY backend/ /app/
+COPY template.yaml /app/templates/local-policy-open-appsec-enabled-for-proxy-host.yaml
+RUN --mount=type=bind,source=node/node_modules,target=/locked,readonly \
+    for name in undici brace-expansion; do dest="/usr/lib/node_modules/npm/node_modules/$name"; test -f "$dest/package.json"; rm -rf "$dest"; cp -a "/locked/$name" "$dest"; done && \
+    mkdir -p /usr/lib/node_modules/npm/node_modules/brace-expansion/node_modules && cp -a /locked/balanced-match /usr/lib/node_modules/npm/node_modules/brace-expansion/node_modules/ && \
+    rm -rf /app/node_modules/basic-ftp && cp -a /locked/basic-ftp /app/node_modules/ && \
+    cd /app && node --input-type=module -e "import {Client} from 'basic-ftp';import './internal/aegis-waf.js';const c=new Client();c.close();" && npm --version
+RUN --mount=type=bind,source=python,target=/locked,readonly cd /locked && sha256sum -c SHA256SUMS && /opt/certbot/bin/python -m pip install --no-cache-dir --no-deps --no-index /locked/*.whl && /opt/certbot/bin/certbot --version
+RUN rm -r /app/frontend
+COPY frontend/ /app/frontend/
