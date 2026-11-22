@@ -1,5 +1,5 @@
 0006dc3c7572a9a8270bbe29ed298a4a34243dfb1ed47590a67710af794d9782  aegis-config/releases/compose-v0.4.1.yml
-2ab98d5306b754b9d3fc38710a9df8f87dd06cbadd15332cf4d7b2160abb22a2  aegis-config/scripts/update-manager.sh
+694c345b975596d7e381e82f0a1d65a6d0061e00ed942308aecf7efc202bea3e  aegis-config/scripts/update-manager.sh
 13bab4ce87c9812ff5c0a381eb5d1b5f25323ece17bbbb1da43fa28a5d47aecb  aegis-config/scripts/release-manifest.jq
 391c509cab595fbf91ad6ea6b2a8c0bcdb65732d56f8f8dfd2701d085fa14ea6  aegis-config/scripts/agent-review.py
 cfa2908c2978affab7eaa62b28198df7b2ddff12dcfb525f6c8362d955ab64f3  aegis-config/scripts/image-audit.py

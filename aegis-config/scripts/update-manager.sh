@@ -179,6 +179,61 @@ release_pages() (
     done
 )
 
+download_release_manifest() {
+    timeout 12s gh release download --repo "$release_repo" --pattern "$2" --output "$3" -- "$1"
+}
+
+verify_release_attestation() {
+    timeout 25s gh attestation verify "$1" \
+        --repo "$release_repo" \
+        --signer-workflow AegisAX/Aegis-Proxy-Stack/.github/workflows/release.yml \
+        --source-ref refs/heads/main \
+        --deny-self-hosted-runners
+}
+
+manifest_changes() {
+    local changes service from_id target
+    changes=$(jq -r '.images | to_entries[] | [.key, .value.from_id, .value.target] | @tsv' "$1") || return 1
+    while IFS=$'\t' read -r service from_id target; do
+        if ! awk -v service="$service" -v id="$from_id" '
+            $1 == service { count++; if ($2 == "running" && $4 == id) matches++ }
+            END { exit !(count == 1 && matches == 1) }
+            ' <<< "$inventory"; then
+            printf 'Existing container does not match manifest for service %s.\n' "$service" >&2
+            return 1
+        fi
+    done <<< "$changes"
+    printf '%s\n' "$changes"
+}
+
+verified_menu_releases() (
+    local candidates=$1 work file channel tag asset scope
+    work=$(mktemp -d) || return 1
+    file="$work/manifest.json"
+    trap 'rm -f -- "$file"; rmdir -- "$work"' EXIT
+    while IFS=$'\t' read -r channel tag; do
+        asset="aegis-$channel-$installed_version-$revision.json"
+        rm -f -- "$file"
+        if ! GH_PROMPT_DISABLED=1 download_release_manifest "$tag" "$asset" "$file" >/dev/null 2>&1 ||
+           ! jq -es --arg channel "$channel" --arg version "$installed_version" --arg revision "$revision" \
+               -f "$toolkit_dir/aegis-config/scripts/release-manifest.jq" "$file" >/dev/null 2>&1 ||
+           ! jq -e --arg tag "$tag" '.release == $tag' "$file" >/dev/null 2>&1 ||
+           ! manifest_changes "$file" >/dev/null 2>&1 ||
+           ! GH_PROMPT_DISABLED=1 verify_release_attestation "$file" >/dev/null 2>&1; then
+            continue
+        fi
+        scope=single
+        if jq -e '.strategy == "stack-v1"' "$file" >/dev/null; then
+            [[ -f $stack_update ]] && python3 -B "$stack_update" plan "$file" >/dev/null 2>&1 || continue
+            scope=stack
+            if jq -e '.images["log-rotator"] | .from_id != .target_id' "$file" >/dev/null; then
+                scope=stack-log
+            fi
+        fi
+        printf '%s\t%s\t%s\n' "$channel" "$tag" "$scope"
+    done <<< "$candidates"
+)
+
 application_supported() {
     "${compose[@]}" config --format json | jq -e --arg service "$1" '
     (.services | keys) as $keys |
@@ -386,6 +441,7 @@ print_image_status() {
     local color label
     case "$2" in
         READY)   color=$good;      label='적용 가능' ;;
+        RELEASE) color=$good;      label='스택 릴리스에 포함' ;;
         REVIEW)  color=$attention; label='검증 필요' ;;
         TESTING) color=$accent;    label='검증 중' ;;
         OBSERVED) color=$good;     label='격리 검증 완료' ;;
@@ -662,11 +718,15 @@ if [[ $interactive == true ]]; then
 
     feature_tags=()
     security_tags=()
+    stack_release_tag=
+    stack_log_release_tag=
     release_status='조회할 수 없음'
     if ! command -v jq >/dev/null; then
         release_status='jq 필요'
-    elif ! command -v gh >/dev/null && ! command -v curl >/dev/null; then
-        release_status='공개 릴리스 조회 도구 필요 (curl 또는 gh)'
+    elif [[ -e $pending || -e $backup_pending ]]; then
+        release_status='복구 완료 후 확인 가능'
+    elif ! command -v gh >/dev/null; then
+        release_status='릴리스 검증에 gh 필요'
     elif [[ ! $installed_version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ||
             ! $revision =~ ^[a-f0-9]{40}$ ]]; then
         release_status='설치 버전 또는 Git 커밋 미확인'
@@ -679,14 +739,34 @@ if [[ $interactive == true ]]; then
             {feature: compatible("aegis-feature-" + $suffix),
              security: compatible("aegis-security-" + $suffix)}
         '); then
-        mapfile -t feature_tags < <(jq -r '.feature[]' <<< "$release_tags")
-        mapfile -t security_tags < <(jq -r '.security[]' <<< "$release_tags")
+        candidates=$(jq -r 'to_entries[] | .key as $channel | .value[] | [$channel, .] | @tsv' <<< "$release_tags")
         release_status='호환 릴리스 없음'
+        if [[ -n $candidates ]]; then
+            release_status='검증된 호환 릴리스 없음'
+            while IFS=$'\t' read -r listed_channel listed_tag listed_scope; do
+                case "$listed_channel" in
+                    feature) feature_tags+=("$listed_tag") ;;
+                    security) security_tags+=("$listed_tag") ;;
+                esac
+                if [[ $dry_run == false && $listed_scope == stack* ]]; then
+                    if [[ -z $stack_release_tag ]]; then stack_release_tag=$listed_tag; fi
+                    if [[ $listed_scope == stack-log && -z $stack_log_release_tag ]]; then
+                        stack_log_release_tag=$listed_tag
+                    fi
+                fi
+            done < <(verified_menu_releases "$candidates")
+        fi
     else
         release_status='GitHub 조회 실패'
     fi
     printf '\n  %s이미지 업데이트%s\n' "$accent" "$reset"
-    inspect_log_patch
+    if [[ -n $stack_log_release_tag ]]; then
+        log_patch_available=false
+        log_patch_state=RELEASE
+        log_patch_status=$stack_log_release_tag
+    else
+        inspect_log_patch
+    fi
     printf '  %s%-19s %s%s\n' "$muted" CONTAINER '업데이트 확인 결과' "$reset"
     log_container=$(awk '$1 == "log-rotator" {sub(/^\//, "", $6); print $6; exit}' <<< "$inventory")
     if command -v jq >/dev/null &&
@@ -731,7 +811,7 @@ if [[ $interactive == true ]]; then
     if [[ -f $stack_backup ]] && command -v python3 >/dev/null; then
         if [[ -e $backup_pending ]]; then
             stack_backup_action=resume
-        elif [[ ! -e $pending ]] && python3 "$stack_backup" check >/dev/null 2>&1; then
+        elif [[ -z $stack_release_tag && ! -e $pending ]] && python3 "$stack_backup" check >/dev/null 2>&1; then
             stack_backup_action=backup
         fi
     fi
@@ -747,9 +827,15 @@ if [[ $interactive == true ]]; then
         printf '\n  %s작업 선택%s\n' "$accent" "$reset"
         if (( ${#feature_tags[@]} )); then printf '  [1] 기능 릴리스 선택\n'; fi
         if (( ${#security_tags[@]} )); then printf '  [2] 보안 릴리스 선택\n'; fi
-        if [[ $log_patch_available == true ]]; then printf '  [4] %s 보안 업데이트\n' "$log_container"; fi
+        if [[ $log_patch_available == true ]]; then
+            if log_recovery_pending; then
+                printf '  [4] %s 중단된 업데이트 복구\n' "$log_container"
+            else
+                printf '  [4] %s 보안 업데이트\n' "$log_container"
+            fi
+        fi
         case "$stack_backup_action" in
-            backup) printf '  [b] 스택 백업 · 서비스 일시 중단\n' ;;
+            backup) printf '  [b] 백업 파일 생성 · 서비스 일시 중단\n' ;;
             resume) printf '  [b] 중단된 백업 후 서비스 재시작\n' ;;
         esac
         if command -v "${AEGIS_TRIVY_BIN:-trivy}" >/dev/null && command -v python3 >/dev/null; then
@@ -788,7 +874,7 @@ if [[ $interactive == true ]]; then
                 temp_dir=$(mktemp -d)
                 trap 'rm -f -- "$temp_dir/manifest.json" "$temp_dir/next.json" "$temp_dir/previous.json" "$temp_dir/pending.json"; rmdir -- "$temp_dir"' EXIT
                 manifest="$temp_dir/manifest.json"
-                if ! gh release download --repo "$release_repo" --pattern "$asset" --output "$manifest" -- "$release_tag"; then
+                if ! download_release_manifest "$release_tag" "$asset" "$manifest"; then
                     printf '  릴리스 매니페스트를 내려받지 못했습니다.\n' >&2
                     exit 1
                 fi
@@ -800,7 +886,11 @@ if [[ $interactive == true ]]; then
                     patch_log_rotator
                     exit $?
                 fi
-                printf '  적용할 log 업데이트가 없습니다.\n'
+                if [[ -n $stack_log_release_tag ]]; then
+                    printf '  로그는 스택 릴리스 %s에서 업데이트합니다.\n' "$stack_log_release_tag"
+                else
+                    printf '  적용할 log 업데이트가 없습니다.\n'
+                fi
                 ;;
             b|B)
                 case "$stack_backup_action" in
@@ -811,7 +901,13 @@ if [[ $interactive == true ]]; then
                     resume)
                         read -r -p '  백업 전 컨테이너를 다시 시작할까요? (y/N) › ' confirm || exit 0
                         ;;
-                    *) printf '  현재 스택의 백업 작업을 시작할 수 없습니다.\n'; continue ;;
+                    *)
+                        if [[ -n $stack_release_tag ]]; then
+                            printf '  스택 릴리스 %s 적용 중에 백업을 자동으로 생성합니다.\n' "$stack_release_tag"
+                        else
+                            printf '  현재 스택의 백업 작업을 시작할 수 없습니다.\n'
+                        fi
+                        continue ;;
                 esac
                 [[ $confirm == [yY] ]] || continue
                 python3 "$stack_backup" "$stack_backup_action"
@@ -851,11 +947,7 @@ if [[ -n $manifest ]]; then
         cp -- "$manifest" "$snapshot"
     fi
 
-    gh attestation verify "$snapshot" \
-        --repo "$release_repo" \
-        --signer-workflow AegisAX/Aegis-Proxy-Stack/.github/workflows/release.yml \
-        --source-ref refs/heads/main \
-        --deny-self-hosted-runners
+    verify_release_attestation "$snapshot"
 
     if ! jq -es --arg channel "$channel" --arg version "$installed_version" \
         --arg revision "$revision" -f "$toolkit_dir/aegis-config/scripts/release-manifest.jq" "$snapshot" >/dev/null; then
@@ -867,16 +959,7 @@ if [[ -n $manifest ]]; then
         exit 1
     fi
 
-    changes=$(jq -r '.images | to_entries[] | [.key, .value.from_id, .value.target] | @tsv' "$snapshot")
-    while IFS=$'\t' read -r service from_id target; do
-        if ! awk -v service="$service" -v id="$from_id" '
-            $1 == service { count++; if ($2 == "running" && $4 == id) matches++ }
-            END { exit !(count == 1 && matches == 1) }
-            ' <<< "$inventory"; then
-            printf 'Existing container does not match manifest for service %s.\n' "$service" >&2
-            exit 1
-        fi
-    done <<< "$changes"
+    changes=$(manifest_changes "$snapshot")
 
     jq -r '"\nVerified release: \(.release)",
         "Resolved CVEs: \(.resolved_cves | join(", "))"' "$snapshot"

@@ -4,8 +4,8 @@ set -euo pipefail
 # v0.4.1 fetches only update.sh and invokes it with --no-self-update.
 if [[ ${1:-} == --no-self-update ]]; then shift; fi
 install_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-toolkit_tag=v0.4.3
-toolkit_digest=aea5cb5e604156076f7fc3065d8a6297c4e188ad7d81805d99fbe7c917c54a1f
+toolkit_tag=v0.5.0
+toolkit_digest=4ce857237c300e4c179967e076f6b11e4d2055300f9301f0a9f87dc39d75b12a
 toolkit_manifest=aegis-config/releases/toolkit.sha256
 
 verified() {

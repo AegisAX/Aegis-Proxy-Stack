@@ -41,7 +41,12 @@ case "$1 $2" in
     'release download')
         until [[ $1 == --output ]]; do shift; done
         [[ $4 == v0.4.4 ]] || exit 9
-        jq --arg release "${MOCK_RELEASE_NAME:-$4}" '.release=$release' release.json > "$2"
+        release=$4
+        if [[ ${GH_PROMPT_DISABLED:-} != 1 ]]; then release=${MOCK_RELEASE_NAME:-$release}; fi
+        jq --arg release "$release" --arg stale "${MOCK_STALE_IMAGE:-0}" '
+            .release=$release |
+            if $stale == "1" then .images.probe.from_id=("sha256:" + ("0" * 64)) else . end
+        ' release.json > "$2"
         ;;
     *) exit 9 ;;
 esac
@@ -98,11 +103,16 @@ for scenario in failure success; do
         if bash update.sh --security --manifest release.json; then exit 1; fi
         [[ $(current_image) == "$old_id" && ! -e .aegis-update/pending.json ]]
     else
-        printf '2\n2\nn\n' | timeout 40s script -qefc 'bash update.sh --no-self-update' /dev/null >menu.log
+        printf '2\n1\nn\n' | timeout 40s script -qefc 'bash update.sh --no-self-update' /dev/null >menu.log
         grep -F 'Verified release: v0.4.4' menu.log
-        if grep -F 'v0.4.6' menu.log; then exit 1; fi
+        if grep -E 'v0\.4\.[56]' menu.log; then exit 1; fi
+        printf '0\n' | MOCK_STALE_IMAGE=1 timeout 40s script -qefc 'bash update.sh' /dev/null >stale-image.log
+        grep -F '검증된 호환 릴리스 없음' stale-image.log
+        if grep -F '[2] 보안 릴리스 선택' stale-image.log; then exit 1; fi
+        printf '0\n' | MOCK_VERIFY_STATUS=1 timeout 40s script -qefc 'bash update.sh' /dev/null >unsigned.log
+        if grep -F '[2] 보안 릴리스 선택' unsigned.log; then exit 1; fi
         [[ $(current_image) == "$old_id" ]]
-        if printf '2\n2\ny\n' | MOCK_RELEASE_NAME=v0.4.5 timeout 40s \
+        if printf '2\n1\ny\n' | MOCK_RELEASE_NAME=v0.4.5 timeout 40s \
             script -qefc 'bash update.sh' /dev/null >wrong-tag.log; then exit 1; fi
         grep -F '선택한 GitHub 태그와 서명된 릴리스 이름이 다릅니다' wrong-tag.log
         [[ $(current_image) == "$old_id" ]]

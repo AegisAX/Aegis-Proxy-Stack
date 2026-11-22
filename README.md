@@ -215,7 +215,7 @@ AEGIS_VERIFY_HOST=qa.example.org AEGIS_VERIFY_ALLOW_PATH=/health AEGIS_VERIFY_DE
 프로젝트 디렉토리에서 `./update.sh`를 실행하면 설치 버전, Git 커밋,
 컨테이너 이름, 실행 중인 앱과 버전, 헬스 상태, 이미지 보안 결과를
 표시합니다. 전체 이미지 참조와 해시는 **[i] 이미지 상세**에서 확인합니다.
-GitHub Releases에서 현재 설치에 맞는 기능·보안 릴리스도 함께 조회합니다.
+GitHub Releases의 기능·보안 릴리스는 서명과 실행 이미지가 일치할 때 메뉴에 표시합니다.
 **실행 이미지 취약점**에는 실행 중인 이미지의 전체 ID와 일치하는 검사 결과와
 Trivy DB 시각을 표시합니다. Critical·High는 패키지 유형·이름·취약점별 발견 수,
 KEV는 CISA 목록과 일치하는 고유 CVE 수입니다. **[i]**에서 나머지 심각도와
@@ -266,7 +266,8 @@ bash tests/npm-log-privacy.sh aegis-npm:security-candidate-hardened
 결과를 표시합니다. 파일 내용과 소유자 권한은 유지합니다.
 옵션으로 실행하는 조회 명령은 파일을 변경하지 않습니다.
 
-**[b] 스택 백업**은 네 서비스가 정상일 때 표시됩니다. 확인 후 log, NPM,
+**[b] 백업 파일 생성**은 네 서비스가 정상이고 적용 가능한 스택 릴리스가 없을 때 표시됩니다.
+스택 릴리스에 적용 전 백업이 포함됩니다. 확인 후 log, NPM,
 WAF, MariaDB 순으로 정지해 쓰기가 멈춘 상태에서 DB 파일·NPM 데이터·인증서·
 WAF 설정과 학습 데이터·Compose 설정을 같은 백업에 저장합니다. 그 뒤 DB,
 WAF, NPM, log 순으로 기존 컨테이너를 다시 시작합니다. 백업 전 호스트에서
@@ -295,7 +296,8 @@ python3 aegis-config/scripts/stack-backup.py extract "$SNAPSHOT" "$NEW_RECOVERY_
 이후 쓰기가 발생한 환경을 이전 시점으로 복원하면 그 사이의 데이터가
 누락될 수 있습니다. 운영 전환 시점과 쓰기 재개 조건을 미리 정합니다.
 
-**[4] aegis-log 보안 업데이트**는 프로젝트 릴리스 없이 Alpine 저장소의
+**[4] aegis-log 보안 업데이트**는 적용 가능한 스택 릴리스에 Log 업데이트가 없을 때 표시됩니다.
+이 작업은 Alpine 저장소의
 패키지를 갱신한 로그 순환 이미지를 빌드합니다. 설정 검증과 musl 최소
 수정 버전 확인 후, 승인하면 로그 순환 컨테이너만 교체합니다.
 교체에 실패하면 이전 실행 이미지와 구성을 복구합니다. 적용에 성공한
