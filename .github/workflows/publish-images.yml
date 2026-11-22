@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: Draft release tag
+        description: Published prerelease tag
         required: true
         type: string
       asset:
         description: Reviewed manifest filename committed under releases/<tag>/
         required: true
         type: string
-      check_draft_access:
-        description: Verify read-only access to the draft and its four archives
+      check_access:
+        description: Verify read-only access to the published prerelease
         required: false
         default: false
         type: boolean
@@ -20,13 +20,13 @@ on:
 permissions: {}
 
 jobs:
-  draft-access:
-    if: inputs.check_draft_access && github.repository == 'AegisAX/Aegis-Proxy-Stack' && github.ref == 'refs/heads/main'
+  release-access:
+    if: inputs.check_access && github.repository == 'AegisAX/Aegis-Proxy-Stack' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - name: Verify draft visibility with a read-only token
+      - name: Verify prerelease visibility with a read-only token
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -35,12 +35,12 @@ jobs:
         run: |
           set -euo pipefail
           [[ $RELEASE =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          gh release view "$RELEASE" --json isDraft,assets |
-            jq -e '.isDraft == true and
-              ([.assets[] | select(.name | test("^(agent|db|log|npm)-[a-f0-9]{64}\\.tar\\.gz$"))] | length == 4)'
+          gh release view "$RELEASE" --json isDraft,isPrerelease,assets |
+            jq -e 'select(.isDraft == false and .isPrerelease == true) |
+              {prerelease: .isPrerelease, assets: (.assets | length)}'
 
   images:
-    if: ${{ !inputs.check_draft_access && github.repository == 'AegisAX/Aegis-Proxy-Stack' && github.ref == 'refs/heads/main' }}
+    if: ${{ !inputs.check_access && github.repository == 'AegisAX/Aegis-Proxy-Stack' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Check acceptance and download draft archives
+      - name: Check acceptance and download prerelease archives
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE: ${{ inputs.release }}
@@ -70,7 +70,8 @@ jobs:
           jq -e --arg tag "$RELEASE" '.strategy == "stack-v1" and .release == $tag' "$manifest" >/dev/null
           jq -e --slurpfile manifest "$manifest" -f aegis-config/scripts/qualify-release.jq \
             "$folder/qualification.json" >/dev/null
-          gh release view "$RELEASE" --json isDraft --jq .isDraft | grep -qx true
+          gh release view "$RELEASE" --json isDraft,isPrerelease |
+            jq -e '.isDraft == false and .isPrerelease == true' >/dev/null
 
           install -d -m 700 "$RUNNER_TEMP/aegis-images"
           work="$RUNNER_TEMP/aegis-images"
