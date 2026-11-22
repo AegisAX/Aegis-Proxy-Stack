@@ -11,6 +11,9 @@ export LANG=C
 
 # [Constraint] Version is fixed until explicit user update
 RELEASE_VERSION="v0.4.1"
+FRESH_RELEASE="v0.5.0"
+release_install=false
+install_override=docker-compose.override.yml
 
 # --- [Universal Color Palette] ---
 TXT_RED='\033[1;31m'
@@ -130,9 +133,81 @@ execute_with_spinner() {
     echo ""
 }
 
+# New installations at the release tag use its checked-in, digest-pinned image set.
+prepare_release_install() {
+    local tagged_manifest desired current tmp mode file directory entries
+    tagged_manifest=$(git show "refs/tags/$FRESH_RELEASE:releases/$FRESH_RELEASE/aegis-security-v0.4.1-b28d59173f7c8ecb643dcfe0457c7f558438619a.json") || return 1
+    printf '%s\n' "$tagged_manifest" | jq -es --arg channel security --arg version v0.4.1 \
+        --arg revision b28d59173f7c8ecb643dcfe0457c7f558438619a \
+        -f aegis-config/scripts/release-manifest.jq >/dev/null || return 1
+    jq -e --arg tag "$FRESH_RELEASE" '.release == $tag and .strategy == "stack-v1"' <<< "$tagged_manifest" >/dev/null || return 1
+    release_images=$(jq -c '.images' <<< "$tagged_manifest") || return 1
+    desired=$(jq -cS --arg version "$FRESH_RELEASE" '
+      {"x-aegis-install-release":$version,services:map_values({image:.target,pull_policy:"never"})} |
+      .services["log-rotator"] += {command:["crond","-f","-l","8"],
+        healthcheck:{test:["CMD","/usr/local/sbin/aegis-check-logrotate","--health"],
+                     interval:"5s",timeout:"8s",retries:5}}
+    ' <<< "$release_images") || return 1
+
+    [[ ! -L .aegis-update ]] && mkdir -p -m 700 .aegis-update && [[ -O .aegis-update ]] || return 1
+    mode=$(stat -c '%a' -- .aegis-update) || return 1
+    (( (8#$mode & 077) == 0 )) || return 1
+    command -v flock >/dev/null || return 1
+    [[ ! -L .aegis-update/lock ]] || return 1
+    exec {install_lock}>>.aegis-update/lock || return 1
+    flock -n "$install_lock" || return 1
+    for file in VERSION .aegis-update/{images,pending,stack-pending,backup-pending}.json; do
+        [[ ! -e $file && ! -L $file ]] || return 1
+    done
+    if [[ -f $install_override && ! -L $install_override ]]; then
+        current=$(jq -cS . "$install_override") || return 1
+        [[ $current == "$desired" ]]
+        return
+    fi
+    [[ ! -e .env && ! -L .env && ! -e $install_override && ! -L $install_override ]] || return 1
+    [[ ! -L aegis-data ]] || return 1
+    for directory in aegis-data/{db,npm,certs,learning}; do
+        [[ ! -L $directory ]] || return 1
+        [[ -e $directory ]] || continue
+        [[ -d $directory ]] && entries=$(ls -A -- "$directory") && [[ -z $entries ]] || return 1
+    done
+    current=$(docker compose -f docker-compose.yml ps --all --quiet 2>/dev/null) || return 1
+    [[ -z $current ]] || return 1
+    (
+        umask 077
+        tmp=$(mktemp ./.compose.install.XXXXXXXX) || exit 1
+        trap 'rm -f -- "$tmp"' EXIT
+        printf '%s\n' "$desired" > "$tmp" && ln -- "$tmp" "$install_override"
+    )
+}
+
+pull_release_images() {
+    local service target expected actual baked id
+    for service in db agent npm log-rotator; do
+        target=$(jq -er --arg service "$service" '.[$service].target' <<< "$release_images") || return 1
+        expected=$(jq -er --arg service "$service" '.[$service].target_id' <<< "$release_images") || return 1
+        if ! actual=$(docker image inspect --format '{{.Id}} {{.Os}}/{{.Architecture}}' "$target" 2>/dev/null); then
+            docker image pull "$target" || return 1
+            actual=$(docker image inspect --format '{{.Id}} {{.Os}}/{{.Architecture}}' "$target") || return 1
+        fi
+        [[ $actual == "$expected linux/amd64" ]] || { log_error "$service image does not match the release."; return 1; }
+    done
+    # Keep the scheduler's baked rules consistent with the checked-out configuration.
+    id=$(jq -er '.["log-rotator"].target_id' <<< "$release_images") || return 1
+    baked=$(docker run --rm --pull never --network none --read-only --cap-drop ALL \
+        --security-opt no-new-privileges --entrypoint sha256sum "$id" /usr/local/etc/aegis/logrotate.conf) || return 1
+    [[ ${baked%% *} == "$(sha256sum < aegis-config/logrotate/aegis-rotate.conf | cut -d ' ' -f 1)" ]]
+}
+
+record_fresh_install() (
+    umask 022
+    tmp=$(mktemp ./.version.install.XXXXXXXX) || exit 1
+    trap 'rm -f -- "$tmp"' EXIT
+    printf '%s\n' "$FRESH_RELEASE" > "$tmp" && chmod 644 "$tmp" && ln -- "$tmp" VERSION
+)
+
 # --- [Main Script Start] ---
 
-print_banner
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")" || exit 1
 
 # ------------------------------------------------------------------------------
@@ -153,6 +228,24 @@ if [ ! -f "docker-compose.yml" ]; then
     exit 1
 fi
 
+if [[ ! -e VERSION && ! -L VERSION ]] && command -v git >/dev/null &&
+   tag_commit=$(git rev-parse --verify "refs/tags/$FRESH_RELEASE^{commit}" 2>/dev/null) &&
+   [[ $tag_commit == "$(git rev-parse HEAD)" ]]; then
+    if [[ ! -e .env && ! -L .env ]] || jq -e --arg release "$FRESH_RELEASE" \
+        '."x-aegis-install-release" == $release' "$install_override" >/dev/null 2>&1; then
+        release_install=true
+        RELEASE_VERSION=$FRESH_RELEASE
+    fi
+elif [[ -s VERSION && ! -L VERSION ]]; then
+    RELEASE_VERSION=$(<VERSION)
+fi
+if [[ $release_install == false && ! -e VERSION && -f $install_override && ! -L $install_override ]] &&
+   jq -e --arg release "$FRESH_RELEASE" '."x-aegis-install-release" == $release' "$install_override" >/dev/null 2>&1; then
+    log_error "Resume this installation from the v0.5.0 Git tag."
+    exit 1
+fi
+print_banner
+
 # ------------------------------------------------------------------------------
 # 1. Initialize Runtime Directories
 # ------------------------------------------------------------------------------
@@ -166,6 +259,12 @@ if [[ ! -f .env && -e aegis-data/db ]]; then
         log_error "Existing or unreadable database detected. Restore its matching .env before starting."
         exit 1
     fi
+fi
+
+if [[ $release_install == true ]]; then
+    compose_help=$(docker compose up --help) && grep -Fq -- '--wait-timeout' <<< "$compose_help" ||
+        { log_error "v0.5.0 requires Docker Compose with up --wait-timeout support."; exit 1; }
+    prepare_release_install || { log_error "Could not prepare the v0.5.0 release for this installation."; exit 1; }
 fi
 
 mkdir -p aegis-config/agent
@@ -265,7 +364,7 @@ console.log('NPM_DB_PASSWORD=' + password());
 console.log('NPM_ADMIN_BIND=127.0.0.1');
 NODE
         services=$(docker compose --env-file "$tmp" config --services) || exit 1
-        if grep -Fxq db <<< "$services"; then
+        if [[ $release_install == false ]] && grep -Fxq db <<< "$services"; then
             db_image=$(bash aegis-config/db-security/prepare.sh) || exit 1
             [[ $db_image =~ ^aegis-mariadb:local-[a-f0-9]{64}$ ]] || exit 1
             printf 'AEGIS_DB_IMAGE=%s\nAEGIS_DB_PULL_POLICY=never\n' "$db_image" >> "$tmp" || exit 1
@@ -275,7 +374,7 @@ NODE
     log_success "Generated independent database credentials in .env."
 fi
 
-if [[ ! -s VERSION ]]; then
+if [[ $release_install == false && ! -s VERSION ]]; then
     printf '%s\n' "$RELEASE_VERSION" > VERSION || exit 1
 fi
 
@@ -298,7 +397,7 @@ log_task "Installing locked policy controller dependencies..."
 npm ci --ignore-scripts --no-fund --prefix aegis-config/scripts || exit 1
 log_success "Policy Controller dependencies installed."
 
-if [[ ! -e docker-compose.override.yml && ! -L docker-compose.override.yml && ! -e .aegis-update/pending.json ]]; then
+if [[ $release_install == false && ! -e .aegis-update/images.json && ! -e docker-compose.override.yml && ! -L docker-compose.override.yml && ! -e .aegis-update/pending.json ]]; then
     # A resumed first install can already have .env but no initialized DB or services.
     existing=$(docker compose ps --all --quiet) || exit 1
     if [[ -z $existing ]] && entries=$(ls -A -- aegis-data/db) && [[ -z $entries ]]; then
@@ -327,11 +426,18 @@ while true; do
             compose=(docker compose -f docker-compose.yml)
             [[ ! -f docker-compose.override.yml ]] || compose+=(-f docker-compose.override.yml)
             [[ ! -f .aegis-update/images.json ]] || compose+=(-f .aegis-update/images.json)
-            if [[ -e .aegis-update/pending.json ]]; then
-                log_error "Recover the unfinished update before starting services."; exit 1
+            for journal in .aegis-update/{pending,stack-pending,backup-pending}.json; do
+                if [[ -e $journal || -L $journal ]]; then
+                    log_error "Recover the unfinished operation with update.sh before starting services."
+                    exit 1
+                fi
+            done
+            startup=(-d)
+            if [[ $release_install == true ]]; then
+                pull_release_images || { log_error "Could not verify all v0.5.0 images."; exit 1; }
+                startup+=(--pull never --wait --wait-timeout 180)
             fi
-            "${compose[@]}" up -d
-            if [ $? -ne 0 ]; then log_error "Docker launch failed."; exit 1; fi
+            "${compose[@]}" up "${startup[@]}" || { log_error "Docker launch failed."; exit 1; }
             
             echo ""
             log_success "Core services started."
@@ -403,6 +509,9 @@ while true; do
                     -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary @- || exit 1
                 token_for "$INPUT_EMAIL" "$INPUT_NPM_PASS" >/dev/null ||
                     { log_error "Could not verify the configured administrator."; exit 1; }
+            fi
+            if [[ $release_install == true ]]; then
+                record_fresh_install || { log_error "Could not record the installed version."; exit 1; }
             fi
             log_success "NPM administrator login verified."
             log_success "Installation Complete."

@@ -91,6 +91,7 @@ Aegis-Proxy-Stack은 단순한 통합을 넘어, 운영 안정성과 보안 규�
    터미널에서 아래 명령어를 입력하여 설치된 버전이 아래의 최소 요구사항을 만족하는지 확인합니다.
    * Docker version 20.10.x 이상
    * Docker Compose version v2.0.x 이상
+   * v0.5.0 신규 설치는 Docker Compose의 up --wait-timeout을 사용합니다.
    ```bash
    docker --version
    docker compose version
@@ -142,8 +143,10 @@ Aegis-Proxy-Stack은 단순한 통합을 넘어, 운영 안정성과 보안 규�
    ```
 
 2. **저장소 복제 (Clone Repository)**
+
+   정식 공개된 릴리스 태그를 지정해 새 디렉토리에 복제합니다.
    ```bash
-   git clone https://github.com/AegisAX/Aegis-Proxy-Stack.git
+   git clone --branch v0.5.0 https://github.com/AegisAX/Aegis-Proxy-Stack.git
    cd Aegis-Proxy-Stack
    ```
 
@@ -158,7 +161,7 @@ Aegis-Proxy-Stack은 단순한 통합을 넘어, 운영 안정성과 보안 규�
 
    신규 설치에서는 이메일을 open-appsec 에이전트 식별에도 사용합니다. DB 루트와 DB 앱 계정에는 서로 다른 임의 비밀번호를 생성해 소유자만 읽을 수 있는 `.env`에 보관합니다. 기존 설치의 DB 데이터와 `.env`는 함께 백업해야 합니다. 재설치 시 기존 DB 비밀번호를 유지합니다.
 
-   DB가 포함된 신규 설치는 `aegis-config/db-security/Dockerfile`의 MariaDB 10.11.20을 사용합니다. 검증한 이미지 ID가 로컬에 있으면 재사용하고, 다른 호스트에서는 고정된 빌드 입력으로 이미지를 만든 뒤 버전·초기 데이터 디렉터리 및 사용자 전환을 확인합니다. 결과 태그를 `.env`에 기록해 Compose와 업데이트 관리자가 같은 이미지를 선택합니다. 새로 빌드한 이미지의 취약점 결과는 해당 이미지 ID로 검사한 뒤 표시합니다. 기존 DB는 별도 데이터 디렉터리에서 논리 백업 복원과 롤백을 확인한 뒤 전환해야 합니다.
+   `v0.5.0` 태그의 신규 설치는 GitHub Packages에서 릴리스에 고정된 Linux/amd64 이미지 네 개를 받습니다. 설치기는 이미지 다이제스트와 ID를 검증하고, 네 서비스 헬스체크와 NPM 관리자 로그인을 확인한 뒤 `VERSION`에 `v0.5.0`을 기록합니다. 이미지 설정은 Compose 오버라이드에 저장되어 다음 서비스 시작에도 사용됩니다. 기존 서버가 릴리스로 이동할 때는 `./update.sh`를 사용합니다.
    
    > **Note:** 설치가 완료되면 검증 스크립트(`verify_all.sh`)를 즉시 실행할지 묻는 메시지가 나타납니다.
 
