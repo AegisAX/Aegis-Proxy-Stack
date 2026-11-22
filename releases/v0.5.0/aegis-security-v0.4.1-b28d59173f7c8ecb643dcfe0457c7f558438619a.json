@@ -3,7 +3,7 @@
   "channel": "security",
   "from_version": "v0.4.1",
   "from_commit": "b28d59173f7c8ecb643dcfe0457c7f558438619a",
-  "release": "v0.4.4",
+  "release": "v0.5.0",
   "strategy": "stack-v1",
   "resolved_cves": [
     "CVE-2023-24538",
