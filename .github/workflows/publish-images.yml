@@ -11,12 +11,36 @@ on:
         description: Reviewed manifest filename committed under releases/<tag>/
         required: true
         type: string
+      check_draft_access:
+        description: Verify read-only access to the draft and its four archives
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
 jobs:
+  draft-access:
+    if: inputs.check_draft_access && github.repository == 'AegisAX/Aegis-Proxy-Stack' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify draft visibility with a read-only token
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE: ${{ inputs.release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ $RELEASE =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release view "$RELEASE" --json isDraft,assets |
+            jq -e '.isDraft == true and
+              ([.assets[] | select(.name | test("^(agent|db|log|npm)-[a-f0-9]{64}\\.tar\\.gz$"))] | length == 4)'
+
   images:
-    if: github.repository == 'AegisAX/Aegis-Proxy-Stack' && github.ref == 'refs/heads/main'
+    if: ${{ !inputs.check_draft_access && github.repository == 'AegisAX/Aegis-Proxy-Stack' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
