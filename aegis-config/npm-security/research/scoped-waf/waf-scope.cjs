@@ -114,14 +114,47 @@ async function watch() {
         await new Promise(resolve=>setTimeout(resolve,1000));
     }
 }
+// Policy edits reload NGINX. Warm the newly created workers before reporting success.
+let readiness;
+function workersReady() {
+    if (!readiness) {
+        readiness = new Promise((resolve, reject) => {
+            require('node:child_process').execFile('/bin/sh', ['/app/aegis-waf-ready.sh'],
+                {timeout:125000}, error => error ? reject(error) : resolve());
+        }).finally(() => { readiness = undefined; });
+    }
+    return readiness;
+}
+function checkCurrentPolicy(digest) {
+    const current = crypto.createHash('sha256').update(fs.readFileSync(policy)).digest('hex');
+    if (current !== digest) {
+        throw Object.assign(new Error('A newer WAF policy was saved. Refresh to view the current settings.'),
+            {status:409, public:true});
+    }
+}
 async function awaitPolicy(digest) {
     if (!/^[a-f0-9]{64}$/.test(digest)) throw new Error('Invalid policy revision');
-    const until = Date.now()+45000;
+    // The local apply endpoint queues a policy check. Allow time for its 30-second
+    // polling cycle, acknowledgement by the handlers and the status-file refresh.
+    const until = Date.now() + 120000;
     do {
-        if (await liveRevision() === digest+'-active') return;
+        const running = await liveRevision();
+        checkCurrentPolicy(digest);
+        if (running === digest+'-active') {
+            try {
+                await workersReady();
+            } catch {
+                checkCurrentPolicy(digest);
+                throw Object.assign(new Error('Policy saved. The WAF workers have not confirmed readiness.'),
+                    {status:503, public:true});
+            }
+            checkCurrentPolicy(digest);
+            if (await liveRevision() === digest+'-active') return;
+        }
         await new Promise(resolve=>setTimeout(resolve,500));
     } while (Date.now()<until);
-    throw new Error('Policy saved. The WAF and proxy have not confirmed this policy revision.');
+    throw Object.assign(new Error('Policy saved. WAF activation is still pending and will continue automatically.'),
+        {status:503, public:true});
 }
 if (require.main === module) {
     if (process.argv[2] === 'startup') startup();

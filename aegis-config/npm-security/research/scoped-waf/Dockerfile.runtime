@@ -1,9 +1,13 @@
 ARG PARENT
 FROM ${PARENT}
 LABEL io.aegis.waf.scope="1"
+COPY wait-waf-ready.sh /app/aegis-waf-ready.sh
 COPY waf-scope.cjs /app/aegis-waf-scope.cjs
 COPY aegis-waf.js /app/internal/aegis-waf.js
-RUN test "$(grep -cx 'http {' /etc/nginx/nginx.conf)" = 1 && sed -i '/^http {/a\    include /run/nginx/aegis-waf-scope.conf;' /etc/nginx/nginx.conf && \
+# Give each worker its own management listen socket so loopback warm-up reaches idle workers.
+RUN test "$(grep -c 'listen .*{{NPM_ADMIN_PORT}} default;' /etc/nginx/conf.d/production.conf.template)" = 2 && \
+    sed -i 's/{{NPM_ADMIN_PORT}} default;/{{NPM_ADMIN_PORT}} default reuseport;/' /etc/nginx/conf.d/production.conf.template && \
+    test "$(grep -cx 'http {' /etc/nginx/nginx.conf)" = 1 && sed -i '/^http {/a\    include /run/nginx/aegis-waf-scope.conf;' /etc/nginx/nginx.conf && \
     test "$(grep -c '^exec s6-setuidgid ' /etc/s6-overlay/s6-rc.d/nginx/run)" = 1 && \
     sed -i '/^exec s6-setuidgid /i s6-setuidgid "$PUID:$PGID" node /app/aegis-waf-scope.cjs startup' /etc/s6-overlay/s6-rc.d/nginx/run && \
     mkdir -p /etc/s6-overlay/s6-rc.d/aegis-waf-scope/dependencies.d && \

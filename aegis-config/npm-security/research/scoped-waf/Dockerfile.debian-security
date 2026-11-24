@@ -1,0 +1,15 @@
+ARG BASE
+FROM ${BASE} AS fetch
+RUN set -eu; sed 's|URIs: http:|URIs: https:|' /etc/apt/sources.list.d/debian.sources >/tmp/security.sources; \
+    apt-get -o Dir::Etc::sourcelist=/tmp/security.sources -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 update; \
+    mkdir -p /tmp/debs; cd /tmp/debs; \
+    apt-get -o Dir::Etc::sourcelist=/tmp/security.sources -o Dir::Etc::sourceparts=- download \
+      libgssapi-krb5-2=1.21.3-5+deb13u2 libk5crypto3=1.21.3-5+deb13u2 \
+      libkrb5-3=1.21.3-5+deb13u2 libkrb5support0=1.21.3-5+deb13u2 linux-libc-dev=6.12.118-1; \
+    sha256sum *.deb > SHA256SUMS; \
+    echo '43e9351500bf8037e8528c371767737b3e9dafa0913fe3760964268566508094  SHA256SUMS' | sha256sum -c -
+FROM ${BASE}
+RUN --network=none --mount=type=bind,from=fetch,source=/tmp/debs,target=/tmp/debs \
+    set -eu; cd /tmp/debs; sha256sum -c SHA256SUMS; \
+    DEBIAN_FRONTEND=noninteractive dpkg -i ./*.deb; \
+    test -z "$(dpkg --audit)"; apt-get -s check; nginx -v; node --version

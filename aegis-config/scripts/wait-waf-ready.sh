@@ -26,12 +26,10 @@ connected_workers() {
     count=0
     channels=''
     for pid in $before; do
-        title=$(tr '\000' ' ' <"/proc/$pid/cmdline") || return 1
-        case "$title" in
-            'nginx: worker process shutting down'*) continue ;;
-            'nginx: worker process'*) ;;
-            *) continue ;;
-        esac
+        # An old worker may be finishing the very API request awaiting this check.
+        # Only workers accepting new connections count towards the live generation.
+        title=$(tr -d '\000' <"/proc/$pid/cmdline") || return 1
+        [ "$title" = 'nginx: worker process' ] || continue
         channel=$(awk '
             NF==6 && $6 ~ /^\/dev\/shm\/__cp_nano_(tx|rx)_shared_memory_[0-9]+__$/ {
                 id=$6; sub(/^.*_memory_/,"",id)
@@ -46,6 +44,8 @@ connected_workers() {
     done
     [ "$workers" -eq "$count" ] && [ "$before" = "$(cat "/proc/$master/task/$master/children")" ]
 }
+burst=$workers
+if [ "$burst" -gt 16 ]; then burst=16; fi
 end=$(($(date +%s)+120))
 while [ "$(date +%s)" -lt "$end" ]; do
     if revision && connected_workers && revision; then
@@ -53,7 +53,11 @@ while [ "$(date +%s)" -lt "$end" ]; do
         exit 0
     fi
     # The attachment opens worker IPC lazily. Warm it using only the local management API.
-    for i in 1 2 3 4; do curl --max-time 2 -fsS http://127.0.0.1:81/api/ >/dev/null 2>&1 & done
+    i=0
+    while [ "$i" -lt "$burst" ]; do
+        curl --max-time 2 -fsS http://127.0.0.1:81/api/ >/dev/null 2>&1 &
+        i=$((i+1))
+    done
     wait
     sleep 1
 done

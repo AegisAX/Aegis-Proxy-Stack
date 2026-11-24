@@ -25,7 +25,10 @@ def waf_available:
    $w.body_interruption == {status:503, visits:0} and
    (($w.policy_change.prevent == 200 or $w.policy_change.prevent == 201) and
     $w.policy_change.detect == 200 and $w.policy_change.pending_checked == true and
-    $w.policy_change.restored == true) and
+    $w.policy_change.restored == true and
+    ($w.policy_change.connected_workers | type == "number" and . > 0 and floor == .) and
+    ($w.policy_change.rechecks | type == "array" and length >= 1 and
+      all(.[]; .prevent == 200 and .detect == 200))) and
    ($w | verified_waf_samples("cold"; 1) and verified_waf_samples("ready"; 1) and
          verified_waf_samples("unavailable"; 1) and verified_waf_samples("recovered"; 2)));
 

@@ -511,6 +511,15 @@ while true; do
                     { log_error "Could not verify the configured administrator."; exit 1; }
             fi
             if [[ $release_install == true ]]; then
+                npm_id=$("${compose[@]}" ps -q npm) || exit 1
+                expected=$(jq -er '.npm.target_id' <<< "$release_images") || exit 1
+                [[ $(docker inspect --format '{{.Image}}' "$npm_id") == "$expected" ]] ||
+                    { log_error "The running NPM image differs from the verified release."; exit 1; }
+                scope=$(docker image inspect --format '{{index .Config.Labels "io.aegis.waf.scope"}}' "$expected") || exit 1
+                if [[ $scope == 1 ]]; then
+                    docker exec "$npm_id" sh /app/aegis-waf-ready.sh ||
+                        { log_error "The installed WAF policy and its worker connections are still pending."; exit 1; }
+                fi
                 record_fresh_install || { log_error "Could not record the installed version."; exit 1; }
             fi
             log_success "NPM administrator login verified."

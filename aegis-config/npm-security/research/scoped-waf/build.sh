@@ -35,6 +35,10 @@ docker run --rm --pull never --network none --read-only --cap-drop ALL --entrypo
 (cd "$work/app" && echo '0ac16be4f73a108540c0f42a7625bf0f245e9d37d9c995347c05f6412b16b564  backend/internal/aegis-waf.js' | sha256sum -c -)
 git -C "$work/app" apply --no-index --check "$recipe/npm-policy-ack.patch"
 git -C "$work/app" apply --no-index "$recipe/npm-policy-ack.patch"
+cp "$recipe/../../../scripts/wait-waf-ready.sh" "$work/app/"
 cp "$work/app/backend/internal/aegis-waf.js" "$recipe/waf-scope.cjs" "$work/app/"
-docker build --network none --build-arg PARENT="$tag-module" --iidfile "$work/image.id" \
+docker build --network none --build-arg PARENT="$tag-module" -t "$tag-app" --iidfile "$work/scoped-app.id" \
     -f "$recipe/Dockerfile.runtime" "$work/app"
+# Keep the Debian packages in the deployed image aligned with the reviewed inputs.
+(cd "$recipe" && echo '43e9351500bf8037e8528c371767737b3e9dafa0913fe3760964268566508094  debian-security.sha256' | sha256sum -c -)
+docker build --build-arg BASE="$tag-app" --iidfile "$work/image.id" - <"$recipe/Dockerfile.debian-security"

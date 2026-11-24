@@ -30,7 +30,8 @@ def main():
     evidence = dict(schema=1, policy_source="installed",
                     images={k: IDS[k] for k in ("agent", "npm")},
                     body_interruption={"status":503, "visits":0},
-                    policy_change=dict(prevent=201,detect=200,pending_checked=True,restored=True),
+                    policy_change=dict(prevent=201,detect=200,pending_checked=True,restored=True,
+                                       connected_workers=16,rechecks=[dict(prevent=200,detect=200)]),
                     samples=[sample(p) for p in ("cold","ready","unavailable","recovered","recovered")])
     with tempfile.TemporaryDirectory() as directory:
         manifest_file = Path(directory) / "manifest.json"
@@ -46,6 +47,9 @@ def main():
             lambda e: e.update(policy_source="manual"),
             lambda e: e["body_interruption"].update(visits=1),
             lambda e: e["policy_change"].update(pending_checked=False),
+            lambda e: e["policy_change"].update(connected_workers=0),
+            lambda e: e["policy_change"].update(rechecks=[]),
+            lambda e: e["policy_change"]["rechecks"][0].update(detect=503),
             lambda e: e["images"].update(npm=IDS["db"]),
             lambda e: e["samples"].pop(),
             lambda e: e["samples"][2]["rows"].pop(),
