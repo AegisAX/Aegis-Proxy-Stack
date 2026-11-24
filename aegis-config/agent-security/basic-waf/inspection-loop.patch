@@ -1,0 +1,125 @@
+--- a/core/messaging/connection/connection.cc
++++ b/core/messaging/connection/connection.cc
+@@ -166,6 +166,7 @@
+     bool
+     isSuspended()
+     {
++        if (connecting) return true;
+         if (active.ok()) return false;
+ 
+         I_TimeGet *i_time = Singleton::Consume<I_TimeGet>::by<Messaging>();
+@@ -190,6 +191,9 @@
+     establishConnection()
+     {
+         dbgFlow(D_CONNECTION) << "Establishing a new connection";
++        if (connecting) return genError("Connection establishment already in progress");
++        connecting = true;
++        auto clear_connecting = make_scope_exit([this] { connecting = false; });
+         auto set_socket = setSocket();
+         if (!set_socket.ok()) {
+             dbgWarning(D_CONNECTION) << "Failed to set socket: " << set_socket.getErr();
+@@ -497,6 +501,8 @@
+                 string error = ERR_error_string(ERR_get_error(), nullptr);
+                 return genError("Failed to obtain a successful SSL handshake. OpenSSL error: " + error);
+             }
++            // A writable TCP socket may still be waiting for the peer's TLS handshake.
++            i_mainloop->yield(chrono::milliseconds(2));
+         }
+ 
+         return genError("SSL handshake reached timed out");
+@@ -533,6 +539,48 @@
+         return BioConnectionStatus::SHOULD_NOT_RETRY;
+     }
+ 
++    // BIO's nonblocking socket flag does not apply to its initial DNS lookup.
++    // Background HTTP integrations must not stall the handler that inspects requests.
++    BioConnectionStatus
++    startLocalHttpConnection(const string &address, I_MainLoop *loop, I_TimeGet *clock, chrono::microseconds deadline)
++    {
++        static atomic<unsigned> pending{0};
++        if (pending.fetch_add(1) >= 4) {
++            --pending;
++            return BioConnectionStatus::SHOULD_NOT_RETRY;
++        }
++
++        using Result = pair<BioUniquePtr<BIO>, BioConnectionStatus>;
++        future<Result> result;
++        try {
++            packaged_task<Result()> start([address] {
++                auto release_slot = make_scope_exit([] { --pending; });
++                BioUniquePtr<BIO> socket(BIO_new(BIO_s_connect()));
++                auto status = BioConnectionStatus::SHOULD_NOT_RETRY;
++                if (socket && BIO_set_conn_hostname(socket.get(), address.c_str()) > 0 &&
++                    BIO_set_nbio(socket.get(), 1) > 0) {
++                    if (BIO_do_connect(socket.get()) > 0) status = BioConnectionStatus::SUCCESS;
++                    else if (BIO_should_retry(socket.get())) status = BioConnectionStatus::SHOULD_RETRY;
++                }
++                return Result(move(socket), status);
++            });
++            result = start.get_future();
++            thread(move(start)).detach();
++        } catch (const system_error &) {
++            --pending;
++            return BioConnectionStatus::SHOULD_NOT_RETRY;
++        }
++        // packaged_task owns the private BIO. A timeout or coroutine cancellation
++        // releases this caller without joining the resolver or touching its socket.
++        while (result.wait_for(chrono::seconds(0)) != future_status::ready) {
++            if (clock->getMonotonicTime() >= deadline) return BioConnectionStatus::SHOULD_NOT_RETRY;
++            loop->yield(chrono::milliseconds(2));
++        }
++        auto connected = result.get();
++        if (connected.second != BioConnectionStatus::SHOULD_NOT_RETRY) bio = move(connected.first);
++        return connected.second;
++    }
++
+     Maybe<void>
+     connectToHost()
+     {
+@@ -548,13 +596,20 @@
+         I_MainLoop *i_mainloop = Singleton::Consume<I_MainLoop>::by<Messaging>();
+         I_TimeGet *i_time = Singleton::Consume<I_TimeGet>::by<Messaging>();
+ 
+-        BioConnectionStatus bio_connect = tryToBioConnect(full_address);
+-        uint attempts_count = 0;
+         auto conn_end_time = i_time->getMonotonicTime() + getConnectionTimeout();
++        struct in_addr ipv4;
++        struct in6_addr ipv6;
++        const auto &host = key.getHostName();
++        bool resolve_in_background = isUnsecure() && !isOverProxy() &&
++            inet_pton(AF_INET, host.c_str(), &ipv4) != 1 && inet_pton(AF_INET6, host.c_str(), &ipv6) != 1;
++        auto bio_connect = resolve_in_background
++            ? startLocalHttpConnection(full_address, i_mainloop, i_time, conn_end_time)
++            : tryToBioConnect(full_address);
++        uint attempts_count = 0;
+         auto maybe_is_orch = Singleton::Consume<I_Environment>::by<Messaging>()->get<bool>("Is Orchestrator");
+         auto is_orch = maybe_is_orch.ok() && *maybe_is_orch;
+         while (i_time->getMonotonicTime() < conn_end_time && bio_connect == BioConnectionStatus::SHOULD_RETRY) {
+-            if (is_orch) { // fixing code for orch case due to stability concerns - should be removed
++            if (is_orch && !resolve_in_background) { // fixing code for orch case due to stability concerns - should be removed
+                 if (isBioSocketReady()) {
+                     bio_connect = tryToBioConnect(full_address);
+                 } else {
+@@ -564,7 +619,13 @@
+             }
+ 
+             if (isBioSocketReady()) {
+-                bio_connect = tryToBioConnect(full_address);
++                if (resolve_in_background) {
++                    // Continue the same BIO; OpenSSL retains the address list from its first step.
++                    if (BIO_do_connect(bio.get()) > 0) bio_connect = BioConnectionStatus::SUCCESS;
++                    else if (!BIO_should_retry(bio.get())) bio_connect = BioConnectionStatus::SHOULD_NOT_RETRY;
++                } else {
++                    bio_connect = tryToBioConnect(full_address);
++                }
+             }
+ 
+             ++attempts_count;
+@@ -838,6 +899,7 @@
+     string connect_message;
+     string certificate;
+ 
++    bool connecting = false;
+     smartBIO::BioUniquePtr<BIO> bio = nullptr;
+     smartBIO::BioUniquePtr<SSL_CTX> ssl_ctx = nullptr;
+     SSL *ssl_socket = nullptr;

@@ -53,3 +53,23 @@ python3 observe.py /scratch/waf-lab wafsoak-example initial /scratch/new-15m &&
 ```
 
 `inspect`는 컨테이너 소유권과 내부망, 볼륨 공유, 두 이미지의 health 및 기본 모델 파일과 상주하는 16개 ELF의 실제 해시를 검사합니다. 관찰 모드는 매 2초(15분) 또는 30초(48시간)마다 localhost에 평범한 GET을 보내고 30분마다 실제 ELF와 인증서를 검증하는 HTTP/2 GET을 확인합니다. 호스트 디스크 2 GiB·가용 RAM 1 GiB, working set 증가 512 MiB, 지속적인 CPU 과부하, OOM·재시작·worker 교체·샘플 공백·응답 실패를 검사합니다. 출력은 샘플 JSONL과 구간별 결과 JSON입니다. 완료 판정 시 담당자가 두 구간의 경과 시간과 종료 상태, 자동 정리 결과를 함께 확인합니다. 이 정상 트래픽 관찰만으로 모든 입력에 대한 메모리 누수 부재나 공개 배포 승인을 판정할 수 없습니다.
+
+## 검사 루프 수정 후보
+
+`inspection-loop.patch`는 위에 고정한 open-appsec 소스의 HTTP 연결 코드에 적용합니다. 이름 조회와 TLS 재시도 사이에 검사 루프가 다른 작업을 처리할 수 있게 합니다. 소스 패치 SHA-256은 `97748531972898c5417d6f206ce8a6fe15dd2d1296c8a709115228a6be67a495`입니다.
+
+이 코드가 링크되는 빌드 산출물은 `core/libngen_core.so`입니다. 후보 패키지는 이 코어에 WAF 전용 이름을 부여하고 HTTP transaction handler의 동적 의존성 한 개를 교체합니다. NPMplus2 후보를 만든 patchelf 버전은 Ubuntu Noble의 `0.18.0-1.1build1`입니다. 기존 레시피와 같은 입력을 준비한 뒤 빌드 호스트에서 다음 명령을 실행합니다.
+
+```sh
+./build.sh --inspection-loop /input/openappsec-git /input/boost-regex-git /input/official-apks \
+  /input/ninja-build_1.11.1-2_amd64.deb /scratch/new-inspection-build
+```
+
+`transport/`에 패키징용 두 파일이 생성됩니다. `prepare-inspection-core.sh`가 빌드 경로를 제거하고 WAF 전용 SONAME 및 동적 의존성을 설정한 뒤 입력과 산출물의 해시를 확인합니다.
+
+| 후보 산출물 | 컨테이너 안의 배치 위치 | NPMplus2 검증 대상 SHA-256 |
+|---|---|---|
+| WAF 실행 파일 | WAF 설치기의 `./bin/cp-nano-http-transaction-handler` | `82b44a033eb99713e054001cd9656f36181b538ead321c1cb8e92afdf6093a58` |
+| WAF 전용 코어 | `/usr/lib/cpnano/libaegis_waf_core.so` | `ed48ffa38660dba539fc742ba1871a7f6040ff0ecf405592898591a21167d21b` |
+
+통합 시험은 각 WAF 처리기의 `/proc/<pid>/exe` 해시와 `/proc/<pid>/maps`의 실행 가능한 코어 매핑을 확인합니다. NGINX 워커의 송수신 공유메모리 연결, 정상 경로의 200 응답, 명시적 차단 경로의 403 응답과 원본 미도달을 함께 확인합니다. 기존 동결 레시피와 이 후보는 서로 다른 이미지 ID를 사용합니다.
