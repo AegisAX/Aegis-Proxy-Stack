@@ -15,19 +15,19 @@
   },
   "sha256:01ac69580137b28229fdbbc7586d8d2fa561c90a022954aa3dbb7c331d7ce39c": {
     "candidate_for": "sha256:2180a616163b77b957bcabf4e2751ab1bcecb760fd0c93e8119f4293059dc76e",
-    "catalog": "2026.11.20",
+    "catalog": "2026.11.23",
     "critical": 0,
-    "database": "2026-11-21T01:10:48.358484358Z",
+    "database": "2026-11-24T01:05:31.383410241Z",
     "eol": false,
     "high": 0,
     "image": "sha256:01ac69580137b28229fdbbc7586d8d2fa561c90a022954aa3dbb7c331d7ce39c",
     "kev": [],
     "low": 23,
     "medium": 30,
-    "scan_sha256": "946c53ad1062b3ab7f9c1bb84594477b9f1cbf637f6eb18064d04d61df5efbd9",
-    "scanned": "2026-11-21T13:18:54.378374363+09:00",
+    "scan_sha256": "d7848a41dd57d0e0893a491e6cd412eedf2749d66193ff11539edab61e5daf21",
+    "scanned": "2026-11-24T16:19:12.801885793+09:00",
     "unknown": 0,
-    "validation": "MariaDB 10.11.20 · 격리 환경 DB 복원·롤백 통과 · 배포용 다이제스트 미발행"
+    "validation": "MariaDB 10.11.20 · 스테이징 DB 복원·롤백 확인"
   },
   "sha256:1fba1d01aac179ccd920fbe62bc17abdd99895d25c234e563e2b216cf69eca44": {
     "catalog": "2026.11.20",
@@ -60,7 +60,6 @@
     "unknown": 0
   },
   "sha256:4011d192e11d14783ba86f6d1b0ef935495324731e903523390ea40a7e9972e0": {
-    "candidate_for": "sha256:f94c1504a3d0d784172057c9a535b01bf36c142be822c05d59e068881dbb64f4",
     "catalog": "2026.11.20",
     "critical": 0,
     "database": "2026-11-21T01:10:48.358484358Z",
@@ -115,22 +114,21 @@
   },
   "sha256:5efaa4b35ab37b0d6d2e678f7c6881c7d44f5ea5ee4298839a5d91707d947ac4": {
     "candidate_for": "sha256:83b2b6703a620bf2e001ab57f7adc414d891787b3c59859b1b62909e48dd2242",
-    "catalog": "2026.11.20",
+    "catalog": "2026.11.23",
     "critical": 0,
-    "database": "2026-11-21T01:10:48.358484358Z",
+    "database": "2026-11-24T01:05:31.383410241Z",
     "eol": false,
     "high": 0,
     "image": "sha256:5efaa4b35ab37b0d6d2e678f7c6881c7d44f5ea5ee4298839a5d91707d947ac4",
     "kev": [],
     "low": 0,
     "medium": 0,
-    "scan_sha256": "a0bfbc2f2eafba29a2a42be02c3ee14ae6cdb3b7a272d20948727a7f845e0eb9",
-    "scanned": "2026-11-21T12:55:34.177049589+09:00",
+    "scan_sha256": "7583a5acf4b7aaf8944b9b12dc176f5ade2029ef5fbcb7167f6363d53e747c54",
+    "scanned": "2026-11-24T16:19:14.33441201+09:00",
     "unknown": 0,
-    "validation": "Alpine 3.22.8 · 로그 순환·압축·복구 통과 · 전체 등급 0건"
+    "validation": "Alpine 3.22.8 · 로그 순환·압축·복구 확인"
   },
   "sha256:688af57069acc05bc6389a50e47b8c7a7401a4b457681ca587c16669bcbc7e52": {
-    "candidate_for": "sha256:5a8d7738240477e1e9868eb5f98d3ea9937b2e1b5dc465f32228179837087b61",
     "catalog": "2026.11.20",
     "critical": 0,
     "database": "2026-11-21T01:10:48.358484358Z",
@@ -144,6 +142,22 @@
     "scanned": "2026-11-21T04:17:11.377415548Z",
     "unknown": 0,
     "validation": "open-appsec 기본 WAF 보완 · 차단·복구 통과 · 48시간 관찰 결과 별도"
+  },
+  "sha256:750a1a53efa7586e1feed8c4c5382ee206d2ae57677fb3c4501043fa28a5400b": {
+    "candidate_for": "sha256:5a8d7738240477e1e9868eb5f98d3ea9937b2e1b5dc465f32228179837087b61",
+    "catalog": "2026.11.23",
+    "critical": 0,
+    "database": "2026-11-24T01:05:31.383410241Z",
+    "eol": false,
+    "high": 0,
+    "image": "sha256:750a1a53efa7586e1feed8c4c5382ee206d2ae57677fb3c4501043fa28a5400b",
+    "kev": [],
+    "low": 0,
+    "medium": 0,
+    "scan_sha256": "d36d487f063eb3302974516f5f648d6f1e33268423f2efa28bd80b6e7f3b75f2",
+    "scanned": "2026-11-24T16:18:53.037188232+09:00",
+    "unknown": 0,
+    "validation": "open-appsec · 보호 모드 장애·복구 확인 · 독립 재빌드 일치"
   },
   "sha256:81d3b1455bf404e81719b4e0b5f2c3542638e628c45498ae1e6d0a72b905797a": {
     "catalog": "2026.11.20",
@@ -172,6 +186,22 @@
     "scan_sha256": "fed9b4448fc2a9fe9bb16166c76a0770557a94e3c30dfd01183deeb92109ffbc",
     "scanned": "2026-11-21T12:11:17.556636453+09:00",
     "unknown": 0
+  },
+  "sha256:ad15852107cc8da03b931a3d85cdbc77e5f2b5e1e41a420cc73633993dbeb48a": {
+    "candidate_for": "sha256:f94c1504a3d0d784172057c9a535b01bf36c142be822c05d59e068881dbb64f4",
+    "catalog": "2026.11.23",
+    "critical": 0,
+    "database": "2026-11-24T01:05:31.383410241Z",
+    "eol": false,
+    "high": 133,
+    "image": "sha256:ad15852107cc8da03b931a3d85cdbc77e5f2b5e1e41a420cc73633993dbeb48a",
+    "kev": [],
+    "low": 972,
+    "medium": 612,
+    "scan_sha256": "1d002b1f40c79a6b3d48c3a9ede0510090bb987aba8d276776d7ba504722bda1",
+    "scanned": "2026-11-24T16:51:31.12418955+09:00",
+    "unknown": 39,
+    "validation": "NPM 2.17.1 · WAF 차단·복구 및 정책 변경 확인 · High 133"
   },
   "sha256:f0aabe74c1d1d6a2a676fe39fa10d233bcdefe657ae9047e06ef474fc4567329": {
     "catalog": "2026.11.20",
