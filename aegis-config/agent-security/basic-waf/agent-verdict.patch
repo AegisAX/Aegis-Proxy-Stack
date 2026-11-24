@@ -1,0 +1,209 @@
+--- a/components/attachment-intakers/nginx_attachment/nginx_attachment.cc
++++ b/components/attachment-intakers/nginx_attachment/nginx_attachment.cc
+@@ -83,6 +83,26 @@
+ static const uint32_t corrupted_session_id = CORRUPTED_SESSION_ID;
+ static const AlertInfo alert(AlertTeam::CORE, "nginx attachment");
+ 
++// Local to the NGINX adapter. Keep the HTTP manager's public verdict ABI unchanged.
++class WafInspectionResult : public FilterVerdict
++{
++public:
++    using FilterVerdict::FilterVerdict;
++    WafInspectionResult(const FilterVerdict &value) : FilterVerdict(value) {}
++
++    static WafInspectionResult unavailable(ServiceVerdict fallback)
++    {
++        WafInspectionResult value(fallback);
++        value.inspection_unavailable = true;
++        return value;
++    }
++
++    bool unavailable() const { return inspection_unavailable; }
++
++private:
++    bool inspection_unavailable = false;
++};
++
+ class FailopenModeListener : public Listener<FailopenModeEvent>
+ {
+ public:
+@@ -854,7 +874,7 @@
+         HttpAttachmentConfig new_conf;
+         new_conf.init();
+ 
+-        default_verdict = FilterVerdict(new_conf.getIsFailOpenModeEnabled() ? ACCEPT : DROP);
++        default_verdict = WafInspectionResult::unavailable(new_conf.getIsFailOpenModeEnabled() ? ACCEPT : DROP);
+ 
+         if (attachment_config == new_conf) return;
+         attachment_config = new_conf;
+@@ -934,7 +954,7 @@
+         return "";
+     }
+ 
+-    FilterVerdict
++    WafInspectionResult
+     handleStartTransaction(const Buffer &data, NginxAttachmentOpaque &opaque)
+     {
+         if (data.size() == 0) {
+@@ -953,7 +973,7 @@
+         return http_manager->inspect(opaque.getTransactionData());
+     }
+ 
+-    FilterVerdict
++    WafInspectionResult
+     handleResponseCode(const Buffer &data)
+     {
+         auto status_code = NginxParser::parseResponseCode(data);
+@@ -969,7 +989,7 @@
+         return http_manager->inspect(status_code.unpack());
+     }
+ 
+-    FilterVerdict
++    WafInspectionResult
+     handleContentLength(const Buffer &data)
+     {
+         auto content_len = NginxParser::parseContentLength(data);
+@@ -992,7 +1012,7 @@
+     }
+ 
+     template <typename M>
+-    FilterVerdict
++    WafInspectionResult
+     handleModifiableChunk(const Maybe<M> &chunk, const string &chunk_desc, bool is_request)
+     {
+         if (!chunk.ok()) {
+@@ -1010,7 +1030,7 @@
+     }
+ 
+     template <typename M>
+-    FilterVerdict
++    WafInspectionResult
+     handleMultiModifiableChunks(const vector<M> &chunks, bool is_request)
+     {
+         FilterVerdict injection_verdict(INJECT);
+@@ -1035,7 +1055,7 @@
+     }
+ 
+     template <typename M>
+-    FilterVerdict
++    WafInspectionResult
+     handleMultiModifiableChunks(const Maybe<vector<M>> &chunks, const string &chunk_desc, bool is_request)
+     {
+         if (!chunks.ok()) {
+@@ -1074,7 +1094,7 @@
+         }
+     }
+ 
+-    FilterVerdict
++    WafInspectionResult
+     handleResponseHeaders(const Buffer &headers_data, NginxAttachmentOpaque &opaque)
+     {
+         dbgFlow(D_NGINX_ATTACHMENT) << "Handling response headers";
+@@ -1115,7 +1135,7 @@
+         return handleMultiModifiableChunks(response_headers, false);
+     }
+ 
+-    FilterVerdict
++    WafInspectionResult
+     handleResponseBody(const Buffer &data, NginxAttachmentOpaque &opaque)
+     {
+         auto &transaction_data = opaque.getTransactionData();
+@@ -1138,7 +1158,7 @@
+         return handleModifiableChunk(http_response_body_maybe, "response body", false);
+     }
+ 
+-    FilterVerdict
++    WafInspectionResult
+     handleChunkedData(ChunkType chunk_type, const Buffer &data, NginxAttachmentOpaque &opaque)
+     {
+         ScopedContext event_type;
+@@ -1158,7 +1178,7 @@
+                 << "No policy rule was found for the current context. Setting verdict to "
+                 << verdictToString(verdict_action);
+ 
+-            return FilterVerdict(verdict_action);
++            return WafInspectionResult::unavailable(verdict_action);
+         }
+ 
+         switch (chunk_type) {
+@@ -1481,9 +1501,9 @@
+     }
+ 
+     void
+-    handleVerdictResponse(const FilterVerdict &verdict, SharedMemoryIPC *ipc, SessionID session_id, bool is_header)
++    handleVerdictResponse(const WafInspectionResult &verdict, SharedMemoryIPC *ipc, SessionID session_id, bool is_header)
+     {
+-        HttpReplyFromService verdict_to_send;
++        HttpReplyFromService verdict_to_send{};
+         verdict_to_send.verdict = static_cast<uint16_t>(verdict.getVerdict());
+         verdict_to_send.session_id = session_id;
+ 
+@@ -1505,7 +1525,8 @@
+ 
+         if (verdict.getVerdict() == DROP) {
+             nginx_attachment_event.addTrafficVerdictCounter(nginxAttachmentEvent::trafficVerdict::DROP);
+-            verdict_to_send.modification_count = 1;
++            // Legacy modules ignore the count for DROP. The response payload remains compatible.
++            verdict_to_send.modification_count = verdict.unavailable() ? 0xa5 : 1;
+             ScopedContext ctx;
+             set<string> triggers_set{verdict.getWebUserResponseID()};
+             ctx.registerValue<set<GenericConfigId>>(TriggerMatcher::ctx_key, triggers_set);
+@@ -1545,6 +1566,13 @@
+             nginx_attachment_event.addTrafficVerdictCounter(nginxAttachmentEvent::trafficVerdict::WAIT);
+         }
+ 
++        if (verdict.getVerdict() == ACCEPT) {
++            // Legacy attachments ignore the trailer. New prevent locations require this
++            // versioned acknowledgement before treating ACCEPT as a completed inspection.
++            const char *marker = verdict.unavailable() ? "AEGIS-U1" : "AEGIS-A1";
++            verdict_fragments.push_back(marker);
++            fragments_sizes.push_back(8);
++        }
+         sendChunkedData(ipc, fragments_sizes.data(), verdict_fragments.data(), verdict_fragments.size());
+     }
+ 
+@@ -1585,7 +1613,7 @@
+         }
+ 
+         handleVerdictResponse(
+-            FilterVerdict(ACCEPT),
++            WafInspectionResult::unavailable(ACCEPT),
+             attachment_ipc,
+             cur_session_id,
+             false
+@@ -1758,7 +1786,7 @@
+         NginxAttachmentOpaque &opaque = i_transaction_table->getState<NginxAttachmentOpaque>();
+         opaque.activateContext();
+ 
+-        FilterVerdict verdict = handleChunkedData(*chunked_data_type, inspection_data, opaque);
++        WafInspectionResult verdict = handleChunkedData(*chunked_data_type, inspection_data, opaque);
+         bool is_header =
+             *chunked_data_type == ChunkType::REQUEST_HEADER  ||
+             *chunked_data_type == ChunkType::RESPONSE_HEADER ||
+@@ -2282,7 +2310,7 @@
+     }
+ 
+     string static_resources_path;
+-    FilterVerdict default_verdict;
++    WafInspectionResult default_verdict = WafInspectionResult::unavailable(ACCEPT);
+     FailopenModeListener fail_open_mode_listener;
+ #ifdef FAILURE_TEST
+     IntentionalFailureHandler intentional_failure_handler;
+@@ -2512,7 +2540,7 @@
+ 
+             popData(ipc);
+             handleVerdictResponse(
+-                FilterVerdict(ACCEPT),
++                WafInspectionResult::unavailable(ACCEPT),
+                 ipc,
+                 cur_session_id,
+                 false
+@@ -2555,7 +2583,7 @@
+         NginxAttachmentOpaque &opaque = i_transaction_table->getState<NginxAttachmentOpaque>();
+         opaque.activateContext();
+ 
+-        FilterVerdict verdict = handleChunkedData(*chunked_data_type, inspection_data, opaque);
++        WafInspectionResult verdict = handleChunkedData(*chunked_data_type, inspection_data, opaque);
+         bool is_header =
+             *chunked_data_type == ChunkType::REQUEST_HEADER  ||
+             *chunked_data_type == ChunkType::RESPONSE_HEADER ||

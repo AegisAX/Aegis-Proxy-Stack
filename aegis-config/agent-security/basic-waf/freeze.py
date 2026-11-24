@@ -38,7 +38,7 @@ def add(tar, name, contents, mode=0o644):
     tar.addfile(member, io.BytesIO(contents))
 
 
-def update_installer(blob, elf):
+def update_installer(blob, elf, expected_digest='73de7db602db5a61c26a529d3c0c0523481ba0462e0e7c2e7feee4a13091fb2b'):
     require(sha(blob) == 'c7d9f7efd52a08d6814cde7888f6009992e8e50c8948a296bfc98170a97f47e9', 'Unexpected parent installer')
     start = blob.index(b'\x1f\x8b\x08')
     header, old = blob[:start], blob[start:]
@@ -66,7 +66,7 @@ def update_installer(blob, elf):
     require(header.count(b'15718') == 5, 'Unexpected makeself size checks')
     header = header.replace(b'15718', str(15718 + max(0, math.ceil(delta / 1024)) + 4).encode())
     installer = header + new
-    require(sha(installer) == '73de7db602db5a61c26a529d3c0c0523481ba0462e0e7c2e7feee4a13091fb2b', 'Installer digest mismatch')
+    require(sha(installer) == expected_digest, 'Installer digest mismatch')
     return installer
 
 

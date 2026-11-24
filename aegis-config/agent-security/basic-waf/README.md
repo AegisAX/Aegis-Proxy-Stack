@@ -73,3 +73,9 @@ python3 observe.py /scratch/waf-lab wafsoak-example initial /scratch/new-15m &&
 | WAF 전용 코어 | `/usr/lib/cpnano/libaegis_waf_core.so` | `ed48ffa38660dba539fc742ba1871a7f6040ff0ecf405592898591a21167d21b` |
 
 통합 시험은 각 WAF 처리기의 `/proc/<pid>/exe` 해시와 `/proc/<pid>/maps`의 실행 가능한 코어 매핑을 확인합니다. NGINX 워커의 송수신 공유메모리 연결, 정상 경로의 200 응답, 명시적 차단 경로의 403 응답과 원본 미도달을 함께 확인합니다. 기존 동결 레시피와 이 후보는 서로 다른 이미지 ID를 사용합니다.
+
+### Protected-host verdicts
+
+The `--scoped-verdict` build includes the inspection-loop changes and marks the difference between an inspection decision and the agent's operational fallback on the private NGINX attachment protocol. It uses the same private transport library as the inspection-loop build. Build it with the five inputs documented above, then package its verified output with `python3 package-scoped.py BUILD_OUTPUT/transport NEW_IMAGE_DIRECTORY`. The packager checks the handler, private library and installer digests.
+
+The scoped agent reports the orchestrator's loaded policy SHA-256 to the shared policy directory. The proxy uses this acknowledgement for preventive hosts. The standalone helper requests policy changes through the agent's existing loopback listener. Its receipt contains only the policy digest.

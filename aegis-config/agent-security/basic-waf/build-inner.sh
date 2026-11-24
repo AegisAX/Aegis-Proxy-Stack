@@ -40,6 +40,7 @@ if grep -Eq "RPATH|RUNPATH" /work/installed-dynamic.txt; then exit 1; fi
 case ${WAF_BUILD_VARIANT:-baseline} in
     baseline) handler_sha=a4d07f54fe3c3f5c553aad98550e9980ebe57b7f1213bf3f2b9e40f111e323c2;;
     inspection-loop) handler_sha=e73af6d7dba3066ceee789edcbef65d5ebb17a824b724c9ec50886a051331053;;
+    scoped-verdict) handler_sha=37075f553667020e107f6caf9f3edf1c31884a5acc8c54e151abe61391365a87;;
     *) echo "Unknown WAF build variant" >&2; exit 2;;
 esac
 echo "$handler_sha  $elf" | sha256sum -c -

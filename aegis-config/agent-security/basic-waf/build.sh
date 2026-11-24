@@ -2,12 +2,12 @@
 # Run on Linux/amd64 with Docker, git, trusted GPG keys, dpkg-deb and binutils.
 set -euo pipefail
 variant=baseline
-if [[ ${1:-} == --inspection-loop ]]; then
+if [[ ${1:-} == --inspection-loop || ${1:-} == --scoped-verdict ]]; then
+    variant=${1#--}
     shift
-    variant=inspection-loop
     command -v patchelf >/dev/null || { echo 'The inspection candidate requires patchelf 0.18.0.' >&2; exit 2; }
 fi
-[[ $# == 5 ]] || { echo 'Usage: build.sh [--inspection-loop] OPENAPPSEC_GIT BOOST_REGEX_GIT APK_DIR NINJA_DEB NEW_OUTPUT_DIR' >&2; exit 2; }
+[[ $# == 5 ]] || { echo 'Usage: build.sh [--inspection-loop|--scoped-verdict] OPENAPPSEC_GIT BOOST_REGEX_GIT APK_DIR NINJA_DEB NEW_OUTPUT_DIR' >&2; exit 2; }
 recipe=$(cd -- "$(dirname -- "$0")" && pwd -P)
 waf=$(realpath -- "$1"); boost=$(realpath -- "$2"); apks=$(realpath -- "$3"); deb=$(realpath -- "$4")
 out=$(realpath -m -- "$5"); [[ ! -e $out ]] || { echo 'Choose a new output directory.' >&2; exit 2; }
@@ -28,9 +28,13 @@ check_sha() { printf '%s  %s\n' "$1" "$2" | sha256sum -c - >/dev/null; }
 check_sha ba098c1ddca4af893b26a5ecf2b692730c1f753ff9d5ec05223ce445a9930568 "$out/regex.patch"
 check_sha 6a17f76a0f75586f1292f6c61a9b07fd0dec963baf6a102b17673f601c6b323a "$deb"
 check_sha 6ed517a1257ca04e1385ad56cd95feff3fa7f29c05c14f672f4419c6350767d6 "$recipe/APK.SHA256"
-if [[ $variant == inspection-loop ]]; then
+if [[ $variant != baseline ]]; then
     check_sha 97748531972898c5417d6f206ce8a6fe15dd2d1296c8a709115228a6be67a495 "$recipe/inspection-loop.patch"
     patch --batch --forward --fuzz=0 -p1 -d "$out/source" <"$recipe/inspection-loop.patch"
+fi
+if [[ $variant == scoped-verdict ]]; then
+    check_sha 28fa27cf95df8e868783ef0811798437cf6b6f36671ca6dc45fe85c1d20a5f1e "$recipe/agent-verdict.patch"
+    patch --batch --forward --fuzz=0 -p1 -d "$out/source" <"$recipe/agent-verdict.patch"
 fi
 dpkg-deb -x "$deb" "$out/ninja"; ninja=$out/ninja/usr/bin/ninja
 [[ $("$ninja" --version) == 1.11.1 ]]
@@ -42,6 +46,6 @@ docker run --rm --pull never --network none --cpus 1 --memory 3g --pids-limit 16
     -v "$recipe:/recipe:ro" -v "$out/regex.patch:/patch:ro" "$image" sh /recipe/build-inner.sh
 python3 "$recipe/verify-deps.py" "$ninja" "$out/work/obj" "$out/dependency-receipt.json"
 
-if [[ $variant == inspection-loop ]]; then
-    "$recipe/prepare-inspection-core.sh" "$out/work" "$out/transport"
+if [[ $variant != baseline ]]; then
+    "$recipe/prepare-inspection-core.sh" "$out/work" "$out/transport" "$variant"
 fi

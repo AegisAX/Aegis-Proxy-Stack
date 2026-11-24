@@ -80,6 +80,11 @@ def verify_stack(command, images, health):
         and (service not in health or "Health" in row["State"])
         for service, row in records.items()), "배포 후 네 서비스의 이미지와 상태가 일치하지 않습니다.")
 
+    npm = records["npm"]
+    if npm["Config"]["Labels"].get("io.aegis.waf.scope") == "1":
+        script = Path(__file__).with_name("wait-waf-ready.sh")
+        docker("exec", "-i", npm["Id"], "sh", "-s", input=script.read_bytes(), timeout=140)
+
 
 def config_state_paths(model):
     paths = {"aegis-data"}
@@ -249,6 +254,18 @@ def apply(manifest):
         image = json.loads(docker("image", "inspect", target, capture_output=True).stdout)[0]
         require(image["Id"] == target_ids[service] and image["Os"] == "linux" and image["Architecture"] == "amd64",
                 f"{service} 레지스트리 이미지가 검증된 Linux/amd64 ID와 다릅니다.")
+        if service == "npm" and (image["Config"].get("Labels") or {}).get("io.aegis.waf.scope") == "1":
+            # Exercise the candidate parser before taking the running stack offline.
+            source = docker("exec", records["npm"]["Id"], "cat", "/ext/appsec/local_policy.yaml",
+                            capture_output=True, timeout=15).stdout
+            try:
+                docker("run", "--rm", "-i", "--pull", "never", "--network", "none", "--read-only",
+                       "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--entrypoint", "node",
+                       target_ids["npm"], "/app/aegis-waf-scope.cjs", "validate-stdin",
+                       input=source, capture_output=True, timeout=30)
+            except subprocess.CalledProcessError as error:
+                raise ValueError("설치된 WAF 정책을 선택한 릴리스에서 해석할 수 없습니다. "
+                                 "서비스 중단 전에 업데이트를 중지했습니다.") from error
     for volume in model["services"]["log-rotator"].get("volumes", []):
         if volume["target"] == "/etc/logrotate.conf":
             baked = docker("run", "--rm", "--pull", "never", "--network", "none", "--read-only",

@@ -1,0 +1,443 @@
+diff --git a/attachments/nginx/ngx_module/ngx_cp_failing_state.c b/attachments/nginx/ngx_module/ngx_cp_failing_state.c
+index 297579e..1634104 100644
+--- a/attachments/nginx/ngx_module/ngx_cp_failing_state.c
++++ b/attachments/nginx/ngx_module/ngx_cp_failing_state.c
+@@ -166,6 +166,7 @@ ngx_http_cp_report_time_metrics(ngx_http_cp_session_data *state)
+ void
+ handle_inspection_failure(int weight, ngx_int_t fail_mode_verdict, ngx_http_cp_session_data *state)
+ {
++    state->inspection_failed = 1;
+     if (state->verdict != TRAFFIC_VERDICT_INSPECT) {
+         // Skipping already inspected data.
+         write_dbg(DBG_LEVEL_TRACE, "Skipping already inspected data");
+diff --git a/attachments/nginx/ngx_module/ngx_cp_hooks.c b/attachments/nginx/ngx_module/ngx_cp_hooks.c
+index 7ea7eee..88d48dd 100644
+--- a/attachments/nginx/ngx_module/ngx_cp_hooks.c
++++ b/attachments/nginx/ngx_module/ngx_cp_hooks.c
+@@ -403,6 +403,27 @@ ngx_http_cp_request_and_response_size_handler(ngx_http_request_t *request)
+     return NGX_DECLINED;
+ }
+ 
++static ngx_flag_t
++requires_waf_verdict(ngx_http_request_t *request)
++{
++    ngx_cp_attachment_conf_t *conf = ngx_http_get_module_loc_conf(request, ngx_http_cp_attachment_module);
++    ngx_str_t value;
++    if (conf == NULL) return 0;
++    if (conf->require_verdict == 1) return 1;
++    if (conf->policy_scope == NULL) return 0;
++    if (ngx_http_complex_value(request, conf->policy_scope, &value) != NGX_OK || value.len != 1) return 2;
++    if (value.data[0] == '0') return 0;
++    if (value.data[0] == '1') return 1;
++    return 2;
++}
++
++static ngx_int_t
++inspection_unavailable(ngx_http_cp_session_data *session)
++{
++    if (session != NULL) session->unavailable_response = 1;
++    return NGX_HTTP_SERVICE_UNAVAILABLE;
++}
++
+ ngx_int_t
+ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
+ {
+@@ -413,12 +434,15 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
+     struct ngx_http_cp_event_thread_ctx_t ctx;
+     struct timespec hook_time_begin;
+     int res;
++    const ngx_flag_t required = requires_waf_verdict(request);
+ 
+     static int is_failure_state_initialized = 0;
+     static int is_metric_data_initialized = 0;
+ 
+     clock_gettime(CLOCK_REALTIME, &hook_time_begin);
+ 
++    if (required == 2) return inspection_unavailable(NULL);
++
+     if (is_failure_state_initialized == 0) {
+         reset_transparent_mode();
+         is_failure_state_initialized = 1;
+@@ -435,11 +459,13 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
+ 
+     if (is_in_transparent_mode()) {
+         updateMetricField(TRANSPARENTS_COUNT, 1);
++        if (required) return inspection_unavailable(NULL);
+         return fail_mode_verdict == NGX_OK ? NGX_DECLINED : NGX_ERROR;
+     }
+ 
+     if (is_ngx_cp_attachment_disabled(request)) {
+         write_dbg(DBG_LEVEL_TRACE, "Ignoring inspection of request on a disabled location");
++        if (required) return inspection_unavailable(NULL);
+         return NGX_DECLINED;
+     }
+ 
+@@ -450,7 +476,8 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
+     }
+ 
+     session_data_p = init_cp_session_data(request);
+-    if (session_data_p == NULL) return NGX_DECLINED;
++    if (session_data_p == NULL) return required ? NGX_HTTP_SERVICE_UNAVAILABLE : NGX_DECLINED;
++    session_data_p->require_verdict = required;
+ 
+     set_current_session_id(session_data_p->session_id);
+     write_dbg(DBG_LEVEL_DEBUG, "Request header filter handling session ID: %d", session_data_p->session_id);
+@@ -461,6 +488,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
+     sessions_per_minute_verdict = enforce_sessions_rate();
+     if (sessions_per_minute_verdict != TRAFFIC_VERDICT_INSPECT) {
+         session_data_p->verdict = sessions_per_minute_verdict;
++        if (required) return inspection_unavailable(session_data_p);
+         return sessions_per_minute_verdict == TRAFFIC_VERDICT_ACCEPT ? NGX_DECLINED : NGX_ERROR;
+     }
+ 
+@@ -490,6 +518,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
+             );
+             updateMetricField(REG_THREAD_TIMEOUT, 1);
+ 
++            if (required) return inspection_unavailable(session_data_p);
+             return fail_mode_verdict == NGX_OK ? NGX_DECLINED : fail_mode_verdict;
+         }
+         write_dbg(
+@@ -499,6 +528,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
+             ctx.res
+         );
+         if (ctx.should_return) {
++            if (required) return inspection_unavailable(session_data_p);
+             session_data_p->verdict = TRAFFIC_VERDICT_ACCEPT;
+             return ctx.res == NGX_OK ? NGX_DECLINED : ctx.res;
+         }
+@@ -515,6 +545,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
+             session_data_p->session_id,
+             session_data_p->verdict == TRAFFIC_VERDICT_ACCEPT ? "accept" : "drop"
+         );
++        if (required) return inspection_unavailable(session_data_p);
+         return fail_mode_verdict == NGX_OK ? NGX_DECLINED : fail_mode_verdict;
+     }
+ 
+@@ -544,6 +575,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
+         );
+         updateMetricField(REQ_HEADER_THREAD_TIMEOUT, 1);
+ 
++        if (required) return inspection_unavailable(session_data_p);
+         return fail_mode_verdict == NGX_OK ? NGX_DECLINED : fail_mode_verdict;
+     }
+     write_dbg(
+@@ -558,10 +590,15 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
+         if (!res) {
+             session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+             updateMetricField(HOLD_THREAD_TIMEOUT, 1);
++            if (required) return inspection_unavailable(session_data_p);
+             return fail_mode_verdict == NGX_OK ? NGX_DECLINED : fail_mode_verdict;
+         }
+     }
+ 
++    if (required && (session_data_p->inspection_failed || ctx.res == NGX_ERROR ||
++                     session_data_p->verdict == TRAFFIC_VERDICT_IRRELEVANT))
++        return inspection_unavailable(session_data_p);
++
+     calcProcessingTime(session_data_p, &hook_time_begin, 1);
+     if (ctx.should_return) {
+         return ctx.res == NGX_OK ? NGX_DECLINED : ctx.res;
+@@ -574,6 +611,7 @@ ngx_http_cp_req_header_handler(ngx_http_request_t *request)
+         ctx.modifications,
+         ctx.res
+     );
++    if (required && session_data_p->inspection_failed) return inspection_unavailable(session_data_p);
+     return result == NGX_OK ? NGX_DECLINED : result;
+ }
+ 
+@@ -583,10 +621,13 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+     struct ngx_http_cp_event_thread_ctx_t ctx;
+     ngx_http_cp_session_data *session_data_p = recover_cp_session_data(request);
+     ngx_int_t final_res;
++    const ngx_flag_t required = (session_data_p && session_data_p->require_verdict) || requires_waf_verdict(request);
+     int res;
+     ngx_chain_t *chain_elem = NULL;
+     struct timespec hook_time_begin;
+ 
++    if (required && (session_data_p == NULL || request->request_body_no_buffering))
++        return inspection_unavailable(session_data_p);
+     if (session_data_p == NULL) return ngx_http_next_request_body_filter(request, request_body_chain);
+ 
+     write_dbg(DBG_LEVEL_DEBUG, "Request body received");
+@@ -594,6 +635,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+     set_current_session_id(0);
+ 
+     if (!isIpcReady()) {
++        if (required) return inspection_unavailable(session_data_p);
+         write_dbg(
+             DBG_LEVEL_TRACE,
+             "IPC is uninitialized. Skipping inspection of current request. Session id: %d",
+@@ -609,6 +651,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+     write_dbg(DBG_LEVEL_TRACE, "Request body filter handling session ID: %d", session_data_p->session_id);
+ 
+     if (is_in_transparent_mode()) {
++        if (required) return inspection_unavailable(session_data_p);
+         session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+         if (fail_mode_verdict == NGX_OK) {
+             return ngx_http_next_request_body_filter(request, request_body_chain);
+@@ -636,6 +679,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+     }
+ 
+     if (was_transaction_timedout(session_data_p)) {
++        if (required) return inspection_unavailable(session_data_p);
+         if (session_data_p->verdict == TRAFFIC_VERDICT_DROP) {
+             return NGX_HTTP_FORBIDDEN;
+         }
+@@ -662,6 +706,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+             "ngx_http_cp_req_body_filter_thread"
+         );
+         if (!res || ctx.res == NGX_ERROR) {
++            if (required) return inspection_unavailable(session_data_p);
+             // failed to execute thread task, or it timed out
+             session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+             write_dbg(
+@@ -688,9 +733,11 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+             ctx.res
+         );
+ 
++        if (required && session_data_p->inspection_failed) return inspection_unavailable(session_data_p);
+         if (session_data_p->verdict == TRAFFIC_VERDICT_WAIT) {
+             res = ngx_http_cp_hold_verdict(&ctx);
+             if (!res) {
++                if (required) return inspection_unavailable(session_data_p);
+                 session_data_p->verdict = fail_mode_hold_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+                 updateMetricField(HOLD_THREAD_TIMEOUT, 1);
+                 return fail_mode_hold_verdict == NGX_OK ? ngx_http_next_request_body_filter(request, request_body_chain) : NGX_HTTP_FORBIDDEN;
+@@ -705,6 +752,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+                 "ngx_http_cp_req_end_transaction_thread"
+             );
+             if (!res) {
++                if (required) return inspection_unavailable(session_data_p);
+                 // failed to execute thread task, or it timed out
+                 session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+                 write_dbg(
+@@ -721,6 +769,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+                 write_dbg(DBG_LEVEL_DEBUG, "spawn ngx_http_cp_hold_verdict");
+                 res = ngx_http_cp_hold_verdict(&ctx);
+                 if (!res) {
++                    if (required) return inspection_unavailable(session_data_p);
+                     write_dbg(DBG_LEVEL_DEBUG, "ngx_http_cp_hold_verdict failed");
+                     updateMetricField(HOLD_THREAD_TIMEOUT, 1);
+                 }
+@@ -735,6 +784,8 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+             );
+         }
+ 
++        if (required && (session_data_p->inspection_failed || ctx.res == NGX_ERROR))
++            return inspection_unavailable(session_data_p);
+         calcProcessingTime(session_data_p, &hook_time_begin, 1);
+         if (ctx.should_return_next_filter) {
+             return ngx_http_next_request_body_filter(request, request_body_chain);
+@@ -744,12 +795,14 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+             return ctx.res == NGX_OK ? NGX_DECLINED : ctx.res;
+         }
+         if (was_transaction_timedout(session_data_p)) {
++            if (required) return inspection_unavailable(session_data_p);
+             session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+             return ngx_http_next_request_body_filter(request, request_body_chain);
+         }
+     }
+ 
+     if (ctx.chain) {
++        if (required) return inspection_unavailable(session_data_p);
+         session_data_p->verdict = fail_mode_verdict == NGX_OK ? TRAFFIC_VERDICT_ACCEPT : TRAFFIC_VERDICT_DROP;
+         write_dbg(
+             DBG_LEVEL_WARNING,
+@@ -769,6 +822,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+     }
+ 
+     if (final_res != NGX_OK) {
++        if (required) return inspection_unavailable(session_data_p);
+         write_dbg(DBG_LEVEL_TRACE, "Handling Failure with fail %s mode", fail_mode_verdict == NGX_OK ? "open" : "close");
+         handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
+         if (fail_mode_verdict == NGX_OK) {
+@@ -787,6 +841,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+         ) != NGX_OK) {
+             write_dbg(DBG_LEVEL_WARNING, "Failed to modify request headers");
+             handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
++            if (required) return inspection_unavailable(session_data_p);
+             if (fail_mode_verdict == NGX_OK) {
+                 return ngx_http_next_request_body_filter(request, request_body_chain);
+             }
+@@ -797,6 +852,7 @@ ngx_http_cp_req_body_filter(ngx_http_request_t *request, ngx_chain_t *request_bo
+         if (ngx_http_cp_body_modifier(request_body_chain, ctx.modifications, request->pool) != NGX_OK) {
+             write_dbg(DBG_LEVEL_WARNING, "Failed to modify request body");
+             handle_inspection_failure(inspection_failure_weight, fail_mode_verdict, session_data_p);
++            if (required) return inspection_unavailable(session_data_p);
+             if (fail_mode_verdict == NGX_OK) {
+                 return ngx_http_next_request_body_filter(request, request_body_chain);
+             }
+@@ -859,7 +915,7 @@ ngx_http_cp_res_header_filter(ngx_http_request_t *request)
+ 
+     if (remove_res_server_header) remove_server_header(request);
+ 
+-    if (session_data_p == NULL) return ngx_http_next_response_header_filter(request);
++    if (session_data_p == NULL || session_data_p->unavailable_response) return ngx_http_next_response_header_filter(request);
+ 
+     set_current_session_id(session_data_p->session_id);
+ 
+@@ -991,7 +1047,7 @@ ngx_http_cp_res_body_filter(ngx_http_request_t *request, ngx_chain_t *body_chain
+     set_current_session_id(0);
+ 
+     session_data_p = recover_cp_session_data(request);
+-    if (session_data_p == NULL) return ngx_http_next_response_body_filter(request, body_chain);
++    if (session_data_p == NULL || session_data_p->unavailable_response) return ngx_http_next_response_body_filter(request, body_chain);
+ 
+     set_current_session_id(session_data_p->session_id);
+     write_dbg(DBG_LEVEL_DEBUG, "Response body filter handling response ID: %d", session_data_p->session_id);
+diff --git a/attachments/nginx/ngx_module/ngx_cp_hooks.h b/attachments/nginx/ngx_module/ngx_cp_hooks.h
+index 49e7737..b3e2539 100644
+--- a/attachments/nginx/ngx_module/ngx_cp_hooks.h
++++ b/attachments/nginx/ngx_module/ngx_cp_hooks.h
+@@ -35,6 +35,9 @@ static const ngx_int_t METRIC_TIMEOUT_VAL = METRIC_PERIODIC_TIMEOUT;
+ /// @brief Holds all the session's information needed to communicate with the nano service.
+ /// @details Such as to save verdict and session ID between the request and the response
+ typedef struct ngx_http_cp_session_data {
++    ngx_flag_t             require_verdict; ///< Snapshot the location policy before entering an attachment thread.
++    ngx_flag_t             inspection_failed; ///< Set for this transaction when a local fallback is used.
++    ngx_flag_t             unavailable_response; ///< The proxy generated an inspection outage response.
+     ngx_int_t              was_request_fully_inspected; ///< Holds if the request fully inspected.
+     ngx_http_cp_verdict_e  verdict; ///< Holds the session's verdict from the Nano Service.
+     uint32_t               session_id; ///< Current session's Id.
+diff --git a/attachments/nginx/ngx_module/ngx_cp_io.c b/attachments/nginx/ngx_module/ngx_cp_io.c
+index 526e126..4fb91de 100644
+--- a/attachments/nginx/ngx_module/ngx_cp_io.c
++++ b/attachments/nginx/ngx_module/ngx_cp_io.c
+@@ -24,6 +24,7 @@
+ #include <limits.h>
+ 
+ #include "ngx_cp_utils.h"
++#include "ngx_cp_hooks.h"
+ #include "ngx_cp_initializer.h"
+ #include "ngx_http_cp_attachment_module.h"
+ #include "ngx_cp_metric.h"
+@@ -243,6 +244,8 @@ ngx_http_cp_send_data_to_service(
+     return NGX_ERROR;
+ }
+ 
++static void free_data_from_service(void);
++
+ ///
+ /// @brief Receieves data from service.
+ /// @returns ngx_http_cp_reply_from_service_t
+@@ -250,11 +253,10 @@ ngx_http_cp_send_data_to_service(
+ ///         - #NULL if failed.
+ ///
+ static ngx_http_cp_reply_from_service_t *
+-ngx_http_cp_receive_data_from_service()
++ngx_http_cp_receive_data_from_service(uint16_t *reply_size)
+ {
+     ngx_int_t res, retry;
+     const char *reply_data;
+-    uint16_t reply_size;
+ 
+     write_dbg(DBG_LEVEL_TRACE, "Receiving verdict data from nano service");
+ 
+@@ -263,7 +265,7 @@ ngx_http_cp_receive_data_from_service()
+             usleep(1);
+             continue;
+         }
+-        res = receiveData(nano_service_ipc, &reply_size, &reply_data);
++        res = receiveData(nano_service_ipc, reply_size, &reply_data);
+         if (res < 0 || reply_data == NULL) {
+             write_dbg(
+                 DBG_LEVEL_TRACE,
+@@ -275,6 +277,10 @@ ngx_http_cp_receive_data_from_service()
+             continue;
+         }
+ 
++        if (*reply_size < sizeof(ngx_http_cp_reply_from_service_t)) {
++            free_data_from_service();
++            return NULL;
++        }
+         return (ngx_http_cp_reply_from_service_t *)reply_data;
+     }
+     return NULL;
+@@ -488,7 +494,8 @@ ngx_http_cp_reply_receiver(
+ 
+     while (*expected_replies) {
+         // For each expected replies, receive the reply from the nano service.
+-        reply_p = ngx_http_cp_receive_data_from_service();
++        uint16_t reply_size = 0;
++        reply_p = ngx_http_cp_receive_data_from_service(&reply_size);
+         if (reply_p == NULL) {
+             write_dbg(DBG_LEVEL_WARNING, "Failed to get reply from the nano service");
+             return NGX_ERROR;
+@@ -505,6 +512,18 @@ ngx_http_cp_reply_receiver(
+             (*expected_replies)--;
+         }
+ 
++        ngx_http_cp_session_data *session = ngx_http_get_module_ctx(request, ngx_http_cp_attachment_module);
++        if (session != NULL && session->require_verdict && (chunk_type <= REQUEST_END || chunk_type == HOLD_DATA) &&
++            ((reply_p->verdict == TRAFFIC_VERDICT_ACCEPT &&
++              (reply_size != sizeof(*reply_p) + 8 || memcmp(reply_p + 1, "AEGIS-A1", 8) != 0)) ||
++             (reply_p->verdict == TRAFFIC_VERDICT_DROP && reply_p->modification_count == 0xa5))) {
++            // No policy decision was made for this transaction. Preserve a distinct
++            // outcome until the main thread can finish the request before proxying it.
++            session->inspection_failed = 1;
++            *expected_replies = 0;
++            free_data_from_service();
++            return NGX_ERROR;
++        }
+         *verdict = reply_p->verdict;
+ 
+         write_dbg(DBG_LEVEL_TRACE, "Verdict %d received, number of repiles left: %d", *verdict, *expected_replies);
+diff --git a/attachments/nginx/ngx_module/ngx_http_cp_attachment_module.c b/attachments/nginx/ngx_module/ngx_http_cp_attachment_module.c
+index d4a7454..e8fd430 100644
+--- a/attachments/nginx/ngx_module/ngx_http_cp_attachment_module.c
++++ b/attachments/nginx/ngx_module/ngx_http_cp_attachment_module.c
+@@ -107,6 +107,22 @@ static ngx_command_t ngx_cp_attachment_commands[] = {
+         offsetof(ngx_cp_attachment_conf_t, enable),
+         NULL
+     },
++    {
++        ngx_string("aegis_waf_policy_scope"),
++        NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
++        ngx_http_set_complex_value_slot,
++        NGX_HTTP_LOC_CONF_OFFSET,
++        offsetof(ngx_cp_attachment_conf_t, policy_scope),
++        NULL
++    },
++    {
++        ngx_string("aegis_require_waf_verdict"),
++        NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
++        ngx_conf_set_flag_slot,
++        NGX_HTTP_LOC_CONF_OFFSET,
++        offsetof(ngx_cp_attachment_conf_t, require_verdict),
++        NULL
++    },
+     {
+         ngx_string("cp_worker_processes"),
+         NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
+@@ -210,6 +226,8 @@ ngx_cp_attachment_create_conf(ngx_conf_t *conf)
+         return NULL;
+     }
+ 
++    module_conf->policy_scope = NGX_CONF_UNSET_PTR;
++    module_conf->require_verdict = NGX_CONF_UNSET;
+     module_conf->enable = NGX_CONF_UNSET;
+     module_conf->num_of_workers = 0;
+     module_conf->current_loc_config_version =  current_config_version;
+@@ -272,6 +290,8 @@ ngx_cp_attachment_merge_conf(ngx_conf_t *configure, void *curr, void *next)
+     ngx_cp_attachment_conf_t *prev = curr;
+     ngx_cp_attachment_conf_t *conf = next;
+ 
++    ngx_conf_merge_ptr_value(conf->policy_scope, prev->policy_scope, NULL);
++    ngx_conf_merge_value(conf->require_verdict, prev->require_verdict, 0);
+     ngx_conf_merge_value(conf->enable, prev->enable, NGX_CONF_UNSET);
+     ngx_conf_merge_value(conf->num_of_workers, prev->num_of_workers, ngx_ncpu);
+     ngx_conf_merge_str_value(conf->waf_tag, prev->waf_tag, "");
+diff --git a/attachments/nginx/ngx_module/ngx_http_cp_attachment_module.h b/attachments/nginx/ngx_module/ngx_http_cp_attachment_module.h
+index c3418f8..68dd8de 100644
+--- a/attachments/nginx/ngx_module/ngx_http_cp_attachment_module.h
++++ b/attachments/nginx/ngx_module/ngx_http_cp_attachment_module.h
+@@ -28,6 +28,8 @@ extern ngx_http_output_body_filter_pt ngx_http_next_response_body_filter; ///< N
+ extern ngx_module_t ngx_http_cp_attachment_module; ///< NGINX Module.
+ 
+ typedef struct {
++    ngx_http_complex_value_t *policy_scope;
++    ngx_flag_t require_verdict;
+     ngx_flag_t enable; ///< Flags if the configuration enabled.
+     ngx_int_t num_of_workers; ///< Number of workers.
+     ngx_uint_t current_loc_config_version; ///< NGINX configuration version.

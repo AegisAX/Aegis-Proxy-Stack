@@ -1,0 +1,9 @@
+ARG BUILDER
+ARG NPM
+FROM ${BUILDER} AS build
+WORKDIR /src
+COPY attachment-1ed86d4.tar.gz build-attachment.sh nginx-scoped-verdict.patch ./
+RUN echo 'c3d0e0e46c9b632023d5a7235647bd8c2bb70ba16ff22229bec60ce4f1da9602  attachment-1ed86d4.tar.gz' | sha256sum -c - && mkdir /src/attachment && tar xzf attachment-1ed86d4.tar.gz -C attachment --strip-components=1 && cd attachment && git apply --check /src/nginx-scoped-verdict.patch && git apply /src/nginx-scoped-verdict.patch && bash /src/build-attachment.sh /src/attachment /src/openresty/build/nginx-1.31.8 /module-out
+ARG NPM
+FROM ${NPM}
+COPY --from=build /module-out/usr/lib/nginx/modules/libngx_module.so /usr/lib/nginx/modules/libngx_module.so

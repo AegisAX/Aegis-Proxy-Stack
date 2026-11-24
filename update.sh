@@ -5,7 +5,7 @@ set -euo pipefail
 if [[ ${1:-} == --no-self-update ]]; then shift; fi
 install_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 toolkit_tag=v0.5.0
-toolkit_digest=4ce857237c300e4c179967e076f6b11e4d2055300f9301f0a9f87dc39d75b12a
+toolkit_digest=ef470b88d8edf238f6c1015e10ec0951bed7464fe797aeb907ba1e8802d7d6d7
 toolkit_manifest=aegis-config/releases/toolkit.sha256
 
 verified() {
