@@ -158,7 +158,8 @@ def main():
                 {'target': 81, 'published': '0', 'host_ip': '${NPM_ADMIN_BIND:?}', 'protocol': 'tcp'}],
                 'environment': {'DB_SQLITE_FILE': '/data/database.sqlite', 'DISABLE_IPV6': 'true',
                                 'IP_RANGES_FETCH_ENABLED': 'false'},
-                'volumes': ['app:/data', 'certs:/etc/letsencrypt'], 'logging': {'driver': 'none'}}},
+                'volumes': ['app:/data', 'certs:/etc/letsencrypt',
+                            './aegis-config/policy:/ext/appsec:ro'], 'logging': {'driver': 'none'}}},
                 'networks': {'default': {'driver_opts': {'com.docker.network.bridge.enable_ip_masquerade': 'false'}}},
                 'volumes': {'app': {}, 'certs': {}}}
             (wd / 'docker-compose.yml').write_text(json.dumps(fixture))
