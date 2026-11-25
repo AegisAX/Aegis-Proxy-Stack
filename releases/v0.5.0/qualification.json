@@ -1,0 +1,602 @@
+{
+  "schema": 1,
+  "phase": "complete",
+  "started_at": "2026-11-24T08:04:46+00:00",
+  "ended_at": "2026-11-24T12:05:04+00:00",
+  "samples": 242,
+  "cleanup": "complete",
+  "images": {
+    "npm": "sha256:ad15852107cc8da03b931a3d85cdbc77e5f2b5e1e41a420cc73633993dbeb48a",
+    "agent": "sha256:750a1a53efa7586e1feed8c4c5382ee206d2ae57677fb3c4501043fa28a5400b",
+    "db": "sha256:01ac69580137b28229fdbbc7586d8d2fa561c90a022954aa3dbb7c331d7ce39c",
+    "log": "sha256:5efaa4b35ab37b0d6d2e678f7c6881c7d44f5ea5ee4298839a5d91707d947ac4"
+  },
+  "scheduled_archives": {
+    "npm": 0,
+    "waf": 0
+  },
+  "log_scheduler": {
+    "phase": "complete",
+    "image_id": "sha256:5efaa4b35ab37b0d6d2e678f7c6881c7d44f5ea5ee4298839a5d91707d947ac4",
+    "verified_at": "2026-11-22T16:38:02+00:00",
+    "schedule": "0 0 * * *",
+    "archives": {
+      "npm": 1,
+      "waf": 1
+    }
+  },
+  "waf_availability": {
+    "schema": 1,
+    "policy_source": "installed",
+    "images": {
+      "npm": "sha256:ad15852107cc8da03b931a3d85cdbc77e5f2b5e1e41a420cc73633993dbeb48a",
+      "agent": "sha256:750a1a53efa7586e1feed8c4c5382ee206d2ae57677fb3c4501043fa28a5400b"
+    },
+    "samples": [
+      {
+        "scenario": "cold",
+        "rows": [
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 503,
+            "visits": 0
+          },
+          {
+            "host": "detect",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 503,
+            "visits": 0
+          },
+          {
+            "host": "detect",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          }
+        ]
+      },
+      {
+        "scenario": "ready",
+        "rows": [
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/policy-deny-probe",
+            "status": 403,
+            "visits": 0
+          }
+        ]
+      },
+      {
+        "scenario": "unavailable",
+        "rows": [
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 503,
+            "visits": 0
+          },
+          {
+            "host": "prevent",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 503,
+            "visits": 0
+          },
+          {
+            "host": "detect",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/policy-deny-probe",
+            "status": 503,
+            "visits": 0
+          }
+        ]
+      },
+      {
+        "scenario": "recovered",
+        "rows": [
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/policy-deny-probe",
+            "status": 403,
+            "visits": 0
+          }
+        ]
+      },
+      {
+        "scenario": "recovered",
+        "rows": [
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/policy-deny-probe",
+            "status": 403,
+            "visits": 0
+          }
+        ]
+      },
+      {
+        "scenario": "recovered",
+        "rows": [
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/policy-deny-probe",
+            "status": 403,
+            "visits": 0
+          }
+        ]
+      },
+      {
+        "scenario": "recovered",
+        "rows": [
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/policy-deny-probe",
+            "status": 403,
+            "visits": 0
+          }
+        ]
+      },
+      {
+        "scenario": "recovered",
+        "rows": [
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/policy-deny-probe",
+            "status": 403,
+            "visits": 0
+          }
+        ]
+      },
+      {
+        "scenario": "recovered",
+        "rows": [
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/policy-deny-probe",
+            "status": 403,
+            "visits": 0
+          }
+        ]
+      },
+      {
+        "scenario": "recovered",
+        "rows": [
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "detect",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "GET",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "off",
+            "method": "POST",
+            "path": "/health-probe",
+            "status": 200,
+            "visits": 1
+          },
+          {
+            "host": "prevent",
+            "method": "GET",
+            "path": "/policy-deny-probe",
+            "status": 403,
+            "visits": 0
+          }
+        ]
+      }
+    ],
+    "body_interruption": {
+      "status": 503,
+      "visits": 0
+    },
+    "policy_change": {
+      "prevent": 200,
+      "detect": 200,
+      "pending_checked": true,
+      "restored": true,
+      "rechecks": [
+        {
+          "prevent": 200,
+          "detect": 200
+        },
+        {
+          "prevent": 200,
+          "detect": 200
+        }
+      ],
+      "connected_workers": 16
+    },
+    "recovery_seconds": 0
+  },
+  "source_sha256": {
+    "plan.json": "9c2fa9bcb9283b8428c462c4542f02dde1d1b91f9c9db40ff19e4e17ef36cd1b",
+    "ownership.json": "eaa475e3fe75b29e6e0dcfde1fc51dddb773fd9171252ef671b04fcc6018a806",
+    "samples.jsonl": "201c14fad7ebc9e38fe4aac3dd775dffe6a85cdb09f179448e63eaca1b568782",
+    "modern-functional.log": "38ad3ec62b6feccdd59cf8368f6f05a4c27208dcf30953ca19d19c7a78d1bd16",
+    "scheduled-log-proof.json": "c172ef055352c8c44b398660f29114585ab2f46b5ed110c0c7c0c8243f70064d",
+    "policy-baseline.json": "803fffc0606de051b0e1f456140cda3dcdcd755da52d344ec52e59248cfb0b8d",
+    "policy-samples.jsonl": "626f303a2cbb63b2c80277277fe16001d3b904c4d5589391d4458606fcc310c3"
+  }
+}
