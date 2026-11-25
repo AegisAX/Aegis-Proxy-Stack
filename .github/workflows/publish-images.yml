@@ -101,12 +101,19 @@ jobs:
           printf '%s' "$GH_TOKEN" | skopeo login --authfile "$auth" --username "$GITHUB_ACTOR" --password-stdin ghcr.io
           trap 'rm -f -- "$auth"' EXIT
           while IFS=$'\t' read -r archive ref id; do
-            raw=$(skopeo inspect --raw "oci-archive:$archive")
-            # Command substitution strips trailing newlines. Hash the original manifest bytes.
-            actual=$(skopeo inspect --raw "oci-archive:$archive" | sha256sum)
-            [[ ${actual%% *} == "${ref##*@}" ]]
-            [[ $(jq -er '.config.digest' <<< "$raw") == "$id" ]]
+            manifest="$work/registry-manifest.json"
+            skopeo inspect --raw "oci-archive:$archive" > "$manifest"
+            actual=$(sha256sum "$manifest")
+            expected=${ref##*@}
+            if [[ "sha256:${actual%% *}" != "$expected" ]]; then
+              echo "::error::Archive manifest for ${ref%@*} differs from $expected (got sha256:${actual%% *})"
+              exit 1
+            fi
+            jq -e --arg id "$id" '.config.digest == $id' "$manifest" >/dev/null
             skopeo copy --authfile "$auth" --preserve-digests "oci-archive:$archive" "docker://${ref%@*}:$RELEASE"
             remote=$(skopeo inspect --authfile "$auth" --raw "docker://$ref" | sha256sum)
-            [[ ${remote%% *} == "${ref##*@}" ]]
+            if [[ "sha256:${remote%% *}" != "$expected" ]]; then
+              echo "::error::Published manifest for ${ref%@*} differs from $expected"
+              exit 1
+            fi
           done < "$work/images.tsv"
